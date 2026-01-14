@@ -37,8 +37,11 @@ export const processVideoJob = async (fileEvent) => {
     // 1. Download & Analyze
     await storage.bucket(BUCKET_NAME).file(rawPath).download({ destination: localInput });
     const transcription = await transcribeAudio(localInput);
+    console.log("📝 Transcription Complete");
     const analysis = await analyzeTranscription(transcription);
+    console.log("🤖 AI Analysis Complete:", analysis);
     const matches = await findEducationalContent(analysis);
+    console.log(`🔍 Found ${matches.length} Educational Matches`);
 
     const stitchList = [path.resolve('assets/intro.mp4'), localInput];
 
@@ -62,7 +65,7 @@ export const processVideoJob = async (fileEvent) => {
 
     // 3. Stitch & Upload
     await stitchDynamicSequence(stitchList, localOutput);
-    
+    console.log("🔗 Video Stitching Complete");
     const finalPath = rawPath.replace('raw/', 'processed/');
     await storage.bucket(BUCKET_NAME).upload(localOutput, { destination: finalPath });
 
