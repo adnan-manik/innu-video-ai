@@ -1,36 +1,53 @@
-import db from './db.js';
+import db from './config/db.js'; // Ensure this path matches your project structure
 
-export const findEducationalContent = async (aiResult) => {
+export const findEducationalContent = async (aiAnalysis) => {
   const matches = [];
-  if (!aiResult || !aiResult.issues) return [];
+  const issues = aiAnalysis.issues || [];
 
-  for (const issue of aiResult.issues) {
-    const keywords = issue.keywords || [];
-    if (keywords.length === 0) continue;
+  console.log("📚 Library Search: Looking for matches for:", JSON.stringify(issues));
+
+  for (const issue of issues) {
+    const aiKeywords = issue.keywords || [];
+    
+    // Safety check: skip if no keywords
+    if (aiKeywords.length === 0) continue;
+    
+    const searchTerms = aiKeywords.map(k => `%${k}%`);
 
     try {
       const query = `
-        SELECT id, title, video_url,
-          (SELECT COUNT(*) FROM unnest(keywords) k WHERE k = ANY($1::text[])) as score
+        SELECT id, title, video_url
         FROM educational_library
         WHERE is_active = true
-        ORDER BY score DESC LIMIT 1;
+        AND EXISTS (
+          SELECT 1
+          FROM unnest(keywords) as k
+          WHERE k ILIKE ANY($1::text[])
+        )
+        LIMIT 1;
       `;
-      const result = await db.query(query, [keywords]);
-      const bestVid = result.rows[0];
 
-      if (bestVid && parseInt(bestVid.score) > 0) {
+      const result = await db.query(query, [searchTerms]);
+      
+      if (result.rows.length > 0) {
+        const video = result.rows[0];
+        console.log(`✅ MATCH FOUND for "${issue.problem}": ${video.title}`);
+        
         matches.push({
           problem: issue.problem,
-          keywords: issue.keywords,
-          library_id: bestVid.id,
-          video_url: bestVid.video_url,
-          title: bestVid.title
+          keywords: aiKeywords,
+          library_id: video.id,
+          video_url: video.video_url,
+          title: video.title
         });
+      } else {
+        console.log(`⚠️ NO MATCH found in DB for "${issue.problem}" with keywords: ${JSON.stringify(aiKeywords)}`);
       }
+
     } catch (err) {
-      console.error(`Library search failed for ${issue.problem}`, err);
+      console.error(`Library Query Error for ${issue.problem}:`, err);
     }
   }
+
   return matches;
 };
