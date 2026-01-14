@@ -56,20 +56,32 @@ app.post('/', async (req, res) => {
   console.log("🔓 Decoded Data:", data);
 
   try {
-    const event = JSON.parse(data);
+const event = JSON.parse(data);
 
-    // 3. LOG THE EVENT TYPE
-    console.log("🧐 Event Type Detected:", event.type || "Unknown");
+    // ✅ NEW: Smarter Detection Logic
+    let eventType = 'Unknown';
+    
+    if (event.type === 'RE_STITCH') {
+        eventType = 'RE_STITCH';
+    } else if (event.kind === 'storage#object' || event.name) {
+        // If it has a 'name' (filepath) or 'kind', it's a file upload
+        eventType = 'FILE_UPLOAD'; 
+    }
 
-    // Ack immediately to prevent Pub/Sub retries
+    console.log(`🧐 Event Type Detected: ${eventType}`);
+
+    // Ack immediately
     res.status(200).send('Ack');
 
     // Route the logic
-    if (event.type === 'RE_STITCH') {
+    if (eventType === 'RE_STITCH') {
+      console.log("♻️ Routing to Re-Stitcher...");
       await processReStitchJob(event.videoId);
-    } else {
-      // Default: Assume it's a file upload event from Storage
+    } else if (eventType === 'FILE_UPLOAD') {
+      console.log(`📂 Routing to Video Processor: ${event.name}`);
       await processVideoJob(event);
+    } else {
+      console.warn("⚠️ Event ignored: Unknown structure");
     }
   } catch (e) {
     console.error("💥 JSON Parse Error:", e);

@@ -6,6 +6,7 @@ import db from './db.js';
 import { transcribeAudio, analyzeTranscription } from './ai.js';
 import { findEducationalContent } from './library.js';
 import { stitchDynamicSequence } from './stitcher.js';
+import { Console } from 'console';
 
 const storage = new Storage();
 const BUCKET_NAME = process.env.GOOGLE_STORAGE_BUCKET;
@@ -29,7 +30,7 @@ export const processVideoJob = async (fileEvent) => {
   const jobId = uuidv4();
   const localInput = `/tmp/${jobId}_raw.mp4`;
   const localOutput = `/tmp/${jobId}_final.mp4`;
-
+  Console.log(`🎬 Processing New Video Upload: ${videoId}`);
   try {
     await db.query(`UPDATE videos SET status = 'processing' WHERE raw_video_path = $1`, [rawPath]);
 
