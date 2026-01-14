@@ -1,4 +1,4 @@
-import db from './config/db.js'; // Ensure this path matches your project structure
+import db from './db.js'; // Ensure this path matches your project structure
 
 export const findEducationalContent = async (aiAnalysis) => {
   const matches = [];
@@ -11,7 +11,7 @@ export const findEducationalContent = async (aiAnalysis) => {
     
     // Safety check: skip if no keywords
     if (aiKeywords.length === 0) continue;
-    
+
     const searchTerms = aiKeywords.map(k => `%${k}%`);
 
     try {
