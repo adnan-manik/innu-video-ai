@@ -10,12 +10,10 @@ import { Console } from 'console';
 
 const storage = new Storage();
 const BUCKET_NAME = process.env.GOOGLE_STORAGE_BUCKET;
-
+const LIBRARY_BUCKET = process.env.GOOGLE_EDU_LIBRARY_BUCKET || 'innu_edu_videos';
 // Helper to download files
-const downloadFile = async (remotePath, localPath) => {
-  // If remotePath is a full URL, you might need axios/fetch. 
-  // Assuming it is a GS path "videos/edu/1.mp4" for this example:
-  await storage.bucket(BUCKET_NAME).file(remotePath).download({ destination: localPath });
+const downloadFile = async (remotePath, localPath, bucketToUse = BUCKET_NAME) => {
+  await storage.bucket(bucketToUse).file(remotePath).download({ destination: localPath });
 };
 
 // ------------------------------------
@@ -56,7 +54,7 @@ export const processVideoJob = async (fileEvent) => {
 
         if (match.video_url) {
             const localEdu = `/tmp/${jobId}_${match.library_id}.mp4`;
-            await downloadFile(match.video_url, localEdu);
+            await downloadFile(match.video_url, localEdu, LIBRARY_BUCKET);
             stitchList.push(localEdu);
         }
     }
