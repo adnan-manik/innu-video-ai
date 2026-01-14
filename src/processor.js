@@ -30,7 +30,7 @@ export const processVideoJob = async (fileEvent) => {
   const jobId = uuidv4();
   const localInput = `/tmp/${jobId}_raw.mp4`;
   const localOutput = `/tmp/${jobId}_final.mp4`;
-  Console.log(`🎬 Processing New Video Upload: ${videoId}`);
+  console.log(`🎬 Processing New Video Upload: ${videoId}`);
   try {
     await db.query(`UPDATE videos SET status = 'processing' WHERE raw_video_path = $1`, [rawPath]);
 
@@ -72,7 +72,7 @@ export const processVideoJob = async (fileEvent) => {
         WHERE raw_video_path = $3
     `, [finalPath, transcription, rawPath]);
 
-    console.log("✅ Initial Video Created");
+    console.log("✅ Video Created");
 
   } catch (e) {
     console.error(e);
