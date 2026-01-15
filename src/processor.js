@@ -1,51 +1,79 @@
 import { Storage } from '@google-cloud/storage';
-import fs from 'fs';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import db from './db.js';
-import { transcribeAudio, analyzeTranscription } from './ai.js';
+import { transcribeAudio, analyzeTranscriptionWithVision } from './ai.js';
 import { findEducationalContent } from './library.js';
-import { stitchDynamicSequence } from './stitcher.js';
-import { Console } from 'console';
+import { stitchDynamicSequence, extractFrame } from './stitcher.js';
 
 const storage = new Storage();
 const BUCKET_NAME = process.env.GOOGLE_STORAGE_BUCKET;
-const LIBRARY_BUCKET = process.env.GOOGLE_EDU_LIBRARY_BUCKET || 'innu_edu_videos';
-// Helper to download files
-const downloadFile = async (remotePath, localPath, bucketToUse = BUCKET_NAME) => {
-  await storage.bucket(bucketToUse).file(remotePath).download({ destination: localPath });
+const LIBRARY_BUCKET = process.env.LIBRARY_BUCKET || BUCKET_NAME; // Fallback if same bucket
+
+// Helper to handle URL or Path downloads
+const downloadFile = async (pathOrUrl, localPath, defaultBucket = BUCKET_NAME) => {
+  let bucket = defaultBucket;
+  let filename = pathOrUrl;
+
+  if (pathOrUrl.startsWith('http')) {
+    try {
+        const urlObj = new URL(pathOrUrl);
+        filename = urlObj.pathname.substring(1); // Remove leading slash
+        // Assume standard GCS URL structure
+        const parts = filename.split('/');
+        bucket = parts[0]; 
+        filename = parts.slice(1).join('/');
+    } catch(e) { /* ignore, treat as path */ }
+  }
+  await storage.bucket(bucket).file(filename).download({ destination: localPath });
 };
 
-// ------------------------------------
-// JOB 1: NEW VIDEO UPLOAD (First Run)
-// ------------------------------------
 export const processVideoJob = async (fileEvent) => {
   const rawPath = fileEvent.name; 
   if (!rawPath.startsWith('raw/')) return;
   
-  // Extract Video UUID from path: raw/ORDER_ID/VIDEO_ID.mp4
   const videoId = path.basename(rawPath, '.mp4'); 
   const jobId = uuidv4();
+  
+  // Local Paths
   const localInput = `/tmp/${jobId}_raw.mp4`;
+  const localFrame = `/tmp/${jobId}_frame.jpg`;
   const localOutput = `/tmp/${jobId}_final.mp4`;
-  console.log(`🎬 Processing New Video Upload: ${videoId}`);
+
+  console.log(`🎬 JOB START: ${videoId}`);
+
   try {
+    // 1. Update DB Status
     await db.query(`UPDATE videos SET status = 'processing' WHERE raw_video_path = $1`, [rawPath]);
 
-    // 1. Download & Analyze
+    // 2. Download Raw Video (Blocking - needed for AI)
+    console.log("⬇️ Downloading Raw Video...");
     await storage.bucket(BUCKET_NAME).file(rawPath).download({ destination: localInput });
-    const transcription = await transcribeAudio(localInput);
-    console.log("📝 Transcription Complete: ", transcription);
-    const analysis = await analyzeTranscription(transcription);
-    console.log("🤖 AI Analysis Complete:", analysis);
+
+    // 3. Parallel AI Processing (Frame Extract + Transcription)
+    console.log("🤖 Starting AI Pipeline...");
+    
+    // Run these at the same time
+    const [framePath, transcription] = await Promise.all([
+        extractFrame(localInput, localFrame),
+        transcribeAudio(localInput)
+    ]);
+
+    // 4. Vision Analysis
+    console.log("🧠 Analyzing with Vision...");
+    const analysis = await analyzeTranscriptionWithVision(transcription, framePath);
+    console.log("AI Result:", JSON.stringify(analysis, null, 2));
+
+    // 5. Find Content in DB
     const matches = await findEducationalContent(analysis);
     console.log(`🔍 Found ${matches.length} Educational Matches`);
 
+    // 6. Prepare Stitch List & Download Edu Videos
     const stitchList = [path.resolve('assets/intro.mp4'), localInput];
+    const downloadQueue = [];
 
-    // 2. Insert into DB & Build List
     for (const match of matches) {
-        // Insert "Audit" record (AI Only)
+        // Insert Audit Record
         await db.query(`
             INSERT INTO video_edit_details 
             (video_id, problem_label, ai_keywords, ai_selected_vid, updated_at)
@@ -54,29 +82,40 @@ export const processVideoJob = async (fileEvent) => {
 
         if (match.video_url) {
             const localEdu = `/tmp/${jobId}_${match.library_id}.mp4`;
-            await downloadFile(match.video_url, localEdu, LIBRARY_BUCKET);
+            // Queue download for parallel execution
+            downloadQueue.push(downloadFile(match.video_url, localEdu, LIBRARY_BUCKET));
             stitchList.push(localEdu);
         }
     }
 
+    // Wait for all educational videos to finish downloading
+    if (downloadQueue.length > 0) {
+        console.log(`⬇️ Downloading ${downloadQueue.length} Edu Clips...`);
+        await Promise.all(downloadQueue);
+    }
+
     stitchList.push(path.resolve('assets/outro.mp4'));
-    console.log("🧩 Stitch List Prepared:", stitchList);
-    // 3. Stitch & Upload
+
+    // 7. Stitch (Ultrafast)
+    console.log("🧵 Stitching...");
     await stitchDynamicSequence(stitchList, localOutput);
-    console.log("🔗 Video Stitching Complete");
+    
+    // 8. Upload Result
     const finalPath = rawPath.replace('raw/', 'processed/');
+    console.log("⬆️ Uploading Final Video...");
     await storage.bucket(BUCKET_NAME).upload(localOutput, { destination: finalPath });
 
+    // 9. Cleanup DB
     await db.query(`
         UPDATE videos 
         SET status = 'completed', processed_video_path = $1, transcription_text = $2 
         WHERE raw_video_path = $3
     `, [finalPath, transcription, rawPath]);
 
-    console.log("✅ Video Created");
+    console.log("✅ JOB COMPLETE");
 
   } catch (e) {
-    console.error(e);
+    console.error("❌ FATAL ERROR:", e);
     await db.query(`UPDATE videos SET status = 'failed' WHERE raw_video_path = $1`, [rawPath]);
   }
 };
