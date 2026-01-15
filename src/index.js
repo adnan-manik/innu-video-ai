@@ -42,8 +42,7 @@ app.post('/', async (req, res) => {
     console.log(`🧐 Event Type Detected: ${eventType}`);
 
     // Ack immediately
-    res.status(200).send('Ack');
-
+    
     // Route the logic
     if (eventType === 'RE_STITCH') {
       console.log("♻️ Routing to Re-Stitcher...");
@@ -54,6 +53,8 @@ app.post('/', async (req, res) => {
     } else {
       console.warn("⚠️ Event ignored: Unknown structure");
     }
+    res.status(200).send('Ack');
+    
   } catch (e) {
     console.error("💥 JSON Parse Error:", e);
     res.status(200).send('Ack'); 
