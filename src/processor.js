@@ -108,7 +108,7 @@ export const processVideoJob = async (fileEvent) => {
     // 9. Cleanup DB
     await db.query(`
         UPDATE videos 
-        SET status = 'completed', processed_video_path = $1, transcription_text = $2 
+        SET status = 'completed', stitched_video_url = $1, transcription_text = $2 
         WHERE raw_video_path = $3
     `, [finalPath, transcription, rawPath]);
 
