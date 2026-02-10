@@ -70,8 +70,8 @@ export const processVideoJob = async (fileEvent) => {
         await updateVideoStatus(rawPath, 'processing', 'Downloading assets...');
 
         await Promise.all([
-            downloadFile('videos/intro.mp4', tmp.intro),
-            downloadFile('videos/outro.mp4', tmp.outro),
+            downloadFile('videos/intro.mp4', tmp.intro) || Promise.resolve(), // Intro is optional
+            downloadFile('videos/outro.mp4', tmp.outro)|| Promise.resolve(), // Outro is optional
             downloadFile(rawPath, tmp.raw)
         ]);
 

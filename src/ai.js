@@ -15,7 +15,11 @@ export const analyzeTranscriptionWithVision = async (transcriptionText, imagePat
   // 1. Convert image to Base64
   const imageBuffer = fs.readFileSync(imagePath);
   const base64Image = imageBuffer.toString('base64');
-  const categories = [""]
+  const categories = ['ADAS', 'Axles & Driveline', 'Body', 'Brake System', 'Checks',
+                      'Cooling System', 'Diesel Injection','Electrical System', 'Engine Management', 
+                      'Engine', 'Exhaust System', 'Fuel System', 'Heating_AC','Fluid Management',
+                      'Hybrid & EV', 'Ignition System', 'Scheduled Maintenance', 'Steering System', 
+                      'Suspension','Tire', 'Transmission'];
   const systemPrompt = `
     You are a Master Automotive Technician.
     
