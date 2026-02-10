@@ -36,7 +36,7 @@ const downloadFile = async (pathOrUrl, localPath, defaultBucket = BUCKET_NAME) =
 async function updateVideoStatus(rawPath, status, message, extraFields = {}) {
     const sets = [`status = $1`, `message = $2`, `updated_at = NOW()`];
     const params = [status, message, rawPath];
-    
+
     Object.keys(extraFields).forEach((key) => {
         sets.push(`${key} = $${params.length + 1}`);
         params.push(extraFields[key]);
@@ -70,11 +70,11 @@ export const processVideoJob = async (fileEvent) => {
         await updateVideoStatus(rawPath, 'processing', 'Downloading assets...');
 
         await Promise.all([
-            downloadFile('videos/intro.mp4', tmp.intro) || Promise.resolve(), // Intro is optional
-            downloadFile('videos/outro.mp4', tmp.outro)|| Promise.resolve(), // Outro is optional
+            downloadFile('videos/intro.mp4', tmp.intro), 
+            downloadFile('videos/outro.mp4', tmp.outro), 
             downloadFile(rawPath, tmp.raw)
         ]);
-
+        console.log("Assets ready, Starting AI Pipeline")
         // --- STAGE 2: AI PIPELINE ---
         const [framePath, transcription] = await Promise.all([
             extractFrame(tmp.raw, tmp.frame),
@@ -107,16 +107,11 @@ export const processVideoJob = async (fileEvent) => {
 
         // --- STAGE 4: VIDEO EDITING (STITCHING) ---
         await downloadFile(matches[0].video_url, tmp.edu, LIBRARY_BUCKET);
-        if(fs.existsSync(tmp.intro) && fs.existsSync(tmp.outro)) {
-            const stitchList = [tmp.intro, tmp.raw, tmp.edu, tmp.outro];
-            await stitchDynamicSequence(stitchList, tmp.output);
-        } 
-        else {
-            console.warn("⚠️ Intro or Outro missing, stitching without them.");
-            const stitchList = [tmp.raw, tmp.edu];
-            await stitchDynamicSequence(stitchList, tmp.output);
-        }
-        
+
+        const stitchList = [tmp.intro, tmp.raw, tmp.edu, tmp.outro];
+        console.log("AI processing done, Stitching...")
+        await stitchDynamicSequence(stitchList, tmp.output);
+
         const thumbnailPath = rawPath.replace('raw/', 'thumbnails/').replace('.mp4', '.jpg');
         await storage.bucket(BUCKET_NAME).upload(tmp.frame, {
             destination: thumbnailPath,
