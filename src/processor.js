@@ -9,7 +9,7 @@ import { stitchDynamicSequence, extractFrame } from './stitcher.js';
 
 const storage = new Storage();
 const BUCKET_NAME = process.env.GOOGLE_STORAGE_BUCKET;
-const LIBRARY_BUCKET = process.env.LIBRARY_BUCKET || BUCKET_NAME;
+const LIBRARY_BUCKET = process.env.LIBRARY_BUCKET;
 
 /**
  * Downloads a file from GCS to a local path.
@@ -37,7 +37,7 @@ async function updateVideoStatus(rawPath, status, message, extraFields = {}) {
     const sets = [`status = $1`, `message = $2`, `updated_at = NOW()`];
     const params = [status, message, rawPath];
     
-    Object.keys(extraFields).forEach((key, i) => {
+    Object.keys(extraFields).forEach((key) => {
         sets.push(`${key} = $${params.length + 1}`);
         params.push(extraFields[key]);
     });
@@ -68,7 +68,7 @@ export const processVideoJob = async (fileEvent) => {
     try {
         // --- STAGE 1: INITIALIZATION & DOWNLOADS ---
         await updateVideoStatus(rawPath, 'processing', 'Downloading assets...');
-        
+
         await Promise.all([
             downloadFile('videos/intro.mp4', tmp.intro),
             downloadFile('videos/outro.mp4', tmp.outro),
@@ -107,9 +107,21 @@ export const processVideoJob = async (fileEvent) => {
 
         // --- STAGE 4: VIDEO EDITING (STITCHING) ---
         await downloadFile(matches[0].video_url, tmp.edu, LIBRARY_BUCKET);
+        if(fs.existsSync(tmp.intro) && fs.existsSync(tmp.outro)) {
+            const stitchList = [tmp.intro, tmp.raw, tmp.edu, tmp.outro];
+            await stitchDynamicSequence(stitchList, tmp.output);
+        } 
+        else {
+            console.warn("⚠️ Intro or Outro missing, stitching without them.");
+            const stitchList = [tmp.raw, tmp.edu];
+            await stitchDynamicSequence(stitchList, tmp.output);
+        }
         
-        const stitchList = [tmp.intro, tmp.raw, tmp.edu, tmp.outro];
-        await stitchDynamicSequence(stitchList, tmp.output);
+        const thumbnailPath = rawPath.replace('raw/', 'thumbnails/').replace('.mp4', '.jpg');
+        await storage.bucket(BUCKET_NAME).upload(tmp.frame, {
+            destination: thumbnailPath,
+            metadata: { contentType: 'image/jpeg' }
+        });
 
         // --- STAGE 5: UPLOAD & FINALIZATION ---
         const finalPath = rawPath.replace('raw/', 'processed/');
@@ -117,6 +129,7 @@ export const processVideoJob = async (fileEvent) => {
 
         await updateVideoStatus(rawPath, 'completed', 'Video processed successfully', {
             stitched_video_url: finalPath,
+            thumbnail_url: thumbnailPath,
             transcription_text: transcription,
             detected_keywords: analysis.issues[0].keywords
         });
@@ -130,6 +143,6 @@ export const processVideoJob = async (fileEvent) => {
         // --- STAGE 6: CLEANUP ---
         // Clean up /tmp to avoid storage leaks in serverless environments
         const filesToDelete = Object.values(tmp);
-        await Promise.all(filesToDelete.map(file => fs.unlink(file).catch(() => {})));
+        await Promise.all(filesToDelete.map(file => fs.unlink(file).catch(() => { })));
     }
 };
