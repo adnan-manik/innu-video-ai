@@ -13,7 +13,7 @@ export const extractFrame = (videoPath, outputPath) => {
         count: 1,
         folder: folder,      
         filename: filename, 
-        timemarks: ['50%'],
+        timemarks: ['30%'],
         size: '1280x720'
       })
       .on('end', () => resolve(outputPath))

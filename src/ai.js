@@ -15,7 +15,7 @@ export const analyzeTranscriptionWithVision = async (transcriptionText, imagePat
   // 1. Convert image to Base64
   const imageBuffer = fs.readFileSync(imagePath);
   const base64Image = imageBuffer.toString('base64');
-
+  const categories = [""]
   const systemPrompt = `
     You are a Master Automotive Technician.
     
@@ -24,8 +24,8 @@ export const analyzeTranscriptionWithVision = async (transcriptionText, imagePat
     Identify the mechanical problems.
     
     OUTPUT RULES:
-    1. Identify the specific problem (e.g., "Warped Rotors").
-    2. Identify the BROAD SYSTEM CATEGORY (Must be one of: "Brakes", "Cooling System", "Suspension", "Engine", "Exhaust", "Electrical", "Body").
+    1. Identify the specific problem.
+    2. Identify the CATEGORY. It MUST be exactly one of these: ${categories.join(", ")}.
     3. Return JSON format.
 
     JSON Structure:
@@ -37,6 +37,7 @@ export const analyzeTranscriptionWithVision = async (transcriptionText, imagePat
           "keywords": ["Radiator Hose", "Coolant Leak"] 
         }
       ]
+      "Issues_related": true/false // flag to indicate if unrelated issues were found, all issues must be related to the same problem/category
     }
   `;
 
