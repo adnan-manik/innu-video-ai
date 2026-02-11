@@ -126,7 +126,7 @@ export const processVideoJob = async (fileEvent) => {
             stitched_video_url: finalPath,
             thumbnail_url: thumbnailPath,
             transcription_text: transcription,
-            detected_keywords: analysis.issues[0].keywords
+            detected_keywords: JSON.stringify(analysis.issues)
         });
 
         console.log(`✅ Process Complete: ${videoId}`);
