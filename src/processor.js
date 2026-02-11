@@ -117,7 +117,7 @@ export const processVideoJob = async (fileEvent) => {
             destination: thumbnailPath,
             metadata: { contentType: 'image/jpeg' }
         });
-
+        console.log("Processing completed, Uploading final video...")
         // --- STAGE 5: UPLOAD & FINALIZATION ---
         const finalPath = rawPath.replace('raw/', 'processed/');
         await storage.bucket(BUCKET_NAME).upload(tmp.output, { destination: finalPath });

@@ -22,10 +22,10 @@ export const findEducationalContent = async (aiAnalysis) => {
           AND EXISTS (
             SELECT 1 FROM unnest(keywords) as k
             WHERE k ILIKE ANY($1::text[])
-          )
+          ) AND category = $2
           LIMIT 1;
         `;
-        const result = await db.query(query, [searchTerms]);
+        const result = await db.query(query, [searchTerms, issue.category]);
         if (result.rows.length > 0) {
           videoMatch = result.rows[0];
         }
