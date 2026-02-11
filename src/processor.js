@@ -70,8 +70,8 @@ export const processVideoJob = async (fileEvent) => {
         await updateVideoStatus(rawPath, 'processing', 'Downloading assets...');
 
         await Promise.all([
-            downloadFile('videos/intro.mp4', tmp.intro), 
-            downloadFile('videos/outro.mp4', tmp.outro), 
+            downloadFile('videos/intro.mp4', tmp.intro),
+            downloadFile('videos/outro.mp4', tmp.outro),
             downloadFile(rawPath, tmp.raw)
         ]);
         console.log("Assets ready, Starting AI Pipeline")
@@ -122,7 +122,14 @@ export const processVideoJob = async (fileEvent) => {
         const finalPath = rawPath.replace('raw/', 'processed/');
         await storage.bucket(BUCKET_NAME).upload(tmp.output, { destination: finalPath });
 
-        await updateVideoStatus(rawPath, 'completed', 'Video processed successfully', {
+        let msg;
+        if (matches[0].title == matches[0].category) {
+            msg = `Video processed successfully but fallback content was used.`;
+        }
+        else {
+            msg = 'Video processed successfully';
+        }
+        await updateVideoStatus(rawPath, 'completed', msg, {
             stitched_video_url: finalPath,
             thumbnail_url: thumbnailPath,
             transcription_text: transcription,
