@@ -161,6 +161,7 @@ export const processVideoJob = async (fileEvent) => {
       thumbnail_url: thumbnailPath,
       transcription_text: transcription,
       detected_keywords: JSON.stringify(analysis.issues),
+      edu_video_id : matches[0].id
     });
 
     console.log(`✅ Process Complete: ${videoId}`);
@@ -206,6 +207,7 @@ export const processRestitchJob = async (video) => {
     );
 
     if (!eduResult.rows.length) {
+      console.log('Job failed! Educational video not found.')
       return await updateVideoStatus(
         rawPath,
         "failed",
@@ -214,7 +216,7 @@ export const processRestitchJob = async (video) => {
     }
 
     const eduVideoUrl = eduResult.rows[0].video_url;
-
+    console.log('Educational found, downloading all assets');
     await Promise.all([
       downloadFile("videos/intro.mp4", tmp.intro),
       downloadFile("videos/outro.mp4", tmp.outro),
