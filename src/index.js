@@ -1,6 +1,6 @@
 import express from 'express';
 import dotenv from 'dotenv';
-import { processVideoJob } from './processor.js';
+import { processVideoJob, processReStitchJob } from './processor.js';
 dotenv.config();
 
 const app = express();
@@ -29,6 +29,15 @@ app.post('/', async (req, res) => {
 
   try {
     const event = JSON.parse(data);
+
+    if (event.data && !event.type && !event.kind) {
+        console.log("⚠️ unwrapping nested 'data' property...");
+        event = event.data;
+    }
+    if (event.message && !event.type && !event.kind) {
+        console.log("⚠️ unwrapping nested 'message' property...");
+        event = event.message;
+    }
 
     let eventType = 'Unknown';
     
