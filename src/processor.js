@@ -161,7 +161,7 @@ export const processVideoJob = async (fileEvent) => {
       thumbnail_url: thumbnailPath,
       transcription_text: transcription,
       detected_keywords: JSON.stringify(analysis.issues),
-      edu_video_id : matches[0].id
+      edu_video_id : matches[0].library_id
     });
 
     console.log(`✅ Process Complete: ${videoId}`);
