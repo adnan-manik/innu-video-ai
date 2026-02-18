@@ -1,6 +1,6 @@
 import express from 'express';
 import dotenv from 'dotenv';
-import { processVideoJob, processReStitchJob } from './processor.js';
+import { processVideoJob, processRestitchJob } from './processor.js';
 dotenv.config();
 
 const app = express();
@@ -55,7 +55,7 @@ app.post('/', async (req, res) => {
     // Route the logic
     if (eventType === 'RE_STITCH') {
       console.log("♻️ Routing to Re-Stitcher...");
-      await processReStitchJob(event.videoId);
+      await processRestitchJob(event.videoId);
     } else if (eventType === 'FILE_UPLOAD') {
       console.log(`📂 Routing to Video Processor: ${event.name}`);
       await processVideoJob(event);
