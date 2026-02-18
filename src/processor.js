@@ -189,7 +189,10 @@ export const processRestitchJob = async (video) => {
     frame: `/tmp/${videoId}_frame.jpg`,
     output: `/tmp/${videoId}_final.mp4`,
   };
-
+  if(!video || !video.videoId){
+    console.log(`Incomplete or invalid data: ${JSON.stringify(video)}`)
+    return;
+  }
   console.log(`🎬 Restitch JOB START: ${videoId}`);
 
   try {
