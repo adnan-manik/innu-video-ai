@@ -55,7 +55,7 @@ app.post('/', async (req, res) => {
     // Route the logic
     if (eventType === 'RE_STITCH') {
       console.log("♻️ Routing to Re-Stitcher...");
-      await processRestitchJob(event);
+      await processRestitchJob(event.video);
     } else if (eventType === 'FILE_UPLOAD') {
       console.log(`📂 Routing to Video Processor: ${event.name}`);
       await processVideoJob(event);
