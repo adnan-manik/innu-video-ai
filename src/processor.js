@@ -216,7 +216,7 @@ export const processRestitchJob = async (video) => {
     }
 
     const eduVideoUrl = eduResult.rows[0].video_url;
-    console.log('Educational found, downloading all assets');
+    console.log(`Educational video found-${eduVideoUrl}, downloading all assets`);
     await Promise.all([
       downloadFile("videos/intro.mp4", tmp.intro),
       downloadFile("videos/outro.mp4", tmp.outro),

@@ -37,7 +37,6 @@ export const findEducationalContent = async (aiAnalysis) => {
     if (!videoMatch && issue.category) {
       console.log(`🛟 Falling back to Motovisuals path for category: ${issue.category}`);
       videoMatch = {
-        id: `fallback_${issue.category}`,
         title: `${issue.category} Overview`,
         // Constructing the path as requested: Motovisuals/Category/Category
         video_url: `Motovisuals/${issue.category}/${issue.category}.mp4` 
