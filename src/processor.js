@@ -6,6 +6,7 @@ import db from "./db.js";
 import { transcribeAudio, analyzeTranscriptionWithVision } from "./ai.js";
 import { findEducationalContent } from "./library.js";
 import { stitchDynamicSequence, extractFrame } from "./stitcher.js";
+import { extractAudio } from "./extractAudio.js";
 
 const storage = new Storage();
 const BUCKET_NAME = process.env.GOOGLE_STORAGE_BUCKET;
@@ -66,6 +67,7 @@ export const processVideoJob = async (fileEvent) => {
   const tmp = {
     intro: `/tmp/${jobId}_intro.mp4`,
     raw: `/tmp/${jobId}_raw.mp4`,
+    audio :`/tmp/${jobId}_audio.mp3`,
     edu: `/tmp/${jobId}_edu.mp4`,
     outro: `/tmp/${jobId}_outro.mp4`,
     frame: `/tmp/${jobId}_frame.jpg`,
@@ -82,12 +84,15 @@ export const processVideoJob = async (fileEvent) => {
       downloadFile("videos/intro.mp4", tmp.intro),
       downloadFile("videos/outro.mp4", tmp.outro),
       downloadFile(rawPath, tmp.raw),
+      extractAudio(tmp.raw, tmp.audio),
     ]);
+
+
     console.log("Assets ready, Starting AI Pipeline");
     // --- STAGE 2: AI PIPELINE ---
     const [framePath, transcription] = await Promise.all([
       extractFrame(tmp.raw, tmp.frame),
-      transcribeAudio(tmp.raw),
+      transcribeAudio(tmp.audio),
     ]);
 
     const analysis = await analyzeTranscriptionWithVision(
