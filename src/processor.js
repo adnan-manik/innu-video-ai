@@ -67,7 +67,7 @@ export const processVideoJob = async (fileEvent) => {
   const tmp = {
     intro: `/tmp/${jobId}_intro.mp4`,
     raw: `/tmp/${jobId}_raw.mp4`,
-    audio :`/tmp/${jobId}_audio.mp3`,
+    audio: `/tmp/${jobId}_audio.mp3`,
     edu: `/tmp/${jobId}_edu.mp4`,
     outro: `/tmp/${jobId}_outro.mp4`,
     frame: `/tmp/${jobId}_frame.jpg`,
@@ -84,7 +84,6 @@ export const processVideoJob = async (fileEvent) => {
       downloadFile("videos/intro.mp4", tmp.intro),
       downloadFile("videos/outro.mp4", tmp.outro),
       downloadFile(rawPath, tmp.raw),
-      extractAudio(tmp.raw, tmp.audio),
     ]);
 
 
@@ -92,7 +91,10 @@ export const processVideoJob = async (fileEvent) => {
     // --- STAGE 2: AI PIPELINE ---
     const [framePath, transcription] = await Promise.all([
       extractFrame(tmp.raw, tmp.frame),
-      transcribeAudio(tmp.audio),
+      (async () => {
+        await extractAudio(tmp.raw, tmp.audio);
+        return transcribeAudio(tmp.audio);
+      })(),
     ]);
 
     const analysis = await analyzeTranscriptionWithVision(
@@ -166,7 +168,7 @@ export const processVideoJob = async (fileEvent) => {
       thumbnail_url: thumbnailPath,
       transcription_text: transcription,
       detected_keywords: JSON.stringify(analysis.issues),
-      edu_video_id : matches[0].library_id
+      edu_video_id: matches[0].library_id
     });
 
     console.log(`✅ Process Complete: ${videoId}`);
@@ -178,7 +180,7 @@ export const processVideoJob = async (fileEvent) => {
     // Clean up /tmp to avoid storage leaks in serverless environments
     const filesToDelete = Object.values(tmp);
     await Promise.all(
-      filesToDelete.map((file) => fs.unlink(file).catch(() => {})),
+      filesToDelete.map((file) => fs.unlink(file).catch(() => { })),
     );
   }
 };
@@ -195,7 +197,7 @@ export const processRestitchJob = async (video) => {
     frame: `/tmp/${videoId}_frame.jpg`,
     output: `/tmp/${videoId}_final.mp4`,
   };
-  if(!video){
+  if (!video) {
     console.log(`Incomplete or invalid data: ${JSON.stringify(video)}`)
     return;
   }
@@ -271,7 +273,7 @@ export const processRestitchJob = async (video) => {
   } finally {
     const filesToDelete = Object.values(tmp);
     await Promise.all(
-      filesToDelete.map((file) => fs.unlink(file).catch(() => {})),
+      filesToDelete.map((file) => fs.unlink(file).catch(() => { })),
     );
   }
 };
