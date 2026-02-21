@@ -1,5 +1,26 @@
 import ffmpeg from 'fluent-ffmpeg';
+import path from 'path';
 import fs from 'fs';
+
+// 🎞️ Helper: Extract Single Frame from Video
+export const extractFrame = (videoPath, outputPath) => {
+  return new Promise((resolve, reject) => {
+
+    const folder = path.dirname(outputPath);
+    const filename = path.basename(outputPath);
+
+    ffmpeg(videoPath)
+      .screenshots({
+        count: 1,
+        folder: folder,      
+        filename: filename, 
+        timemarks: ['50%'],
+        size: '1280x720'
+      })
+      .on('end', () => resolve(outputPath))
+      .on('error', (err) => reject(err));
+  });
+};
 
 // ⚡ Helper: Stitch Videos Dynamically (with Smart Compression)
 export const stitchDynamicSequence = (fileList, outputPath) => {
@@ -17,7 +38,7 @@ export const stitchDynamicSequence = (fileList, outputPath) => {
       totalSizeInMB = 150; // Fallback to heavy compression if fs fails
     }
 
-    // 2. Define Output Options dynamically
+    // 2. Define Output Options dynamically based on your logic
     let outputOptions = [
       '-map [v]', 
       '-map [a]',
@@ -27,7 +48,8 @@ export const stitchDynamicSequence = (fileList, outputPath) => {
     ];
 
     if (totalSizeInMB < 95) {
-      console.log("🚀 < 100MB: Prioritizing Quality & Speed (Superfast/CRF23)");
+      // ✨ < 100MB: Prioritize QUALITY and SPEED
+      console.log(" < 100MB: Prioritizing Quality & Speed (Superfast/CRF23)");
       outputOptions.push(
         '-preset superfast',   // Highest speed (sacrifices compression efficiency, but we don't care here)
         '-crf 23',             // High visual quality
@@ -36,7 +58,7 @@ export const stitchDynamicSequence = (fileList, outputPath) => {
       );
     } else {
       // 🗜️ >= 100MB: Prioritize SIZE and BALANCE (Speed/Quality)
-      console.log("🗜️ >= 100MB: Prioritizing Size (Fast/CRF28/Maxrate)");
+      console.log(" >= 100MB: Prioritizing Size (Fast/CRF28/Maxrate)");
       outputOptions.push(
         '-preset fast',        // Balanced speed (gives CPU time to actually compress the file)
         '-crf 28',             // Lower quality / higher compression
