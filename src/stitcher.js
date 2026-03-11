@@ -1,105 +1,280 @@
-import ffmpeg from 'fluent-ffmpeg';
-import path from 'path';
-import fs from 'fs';
+import ffmpeg from "fluent-ffmpeg";
+import ffmpegStatic from "ffmpeg-static";
+import ffprobe from "ffprobe-static";
+import path from "path";
+import os from "os";
+import fs from "fs/promises";
 
-// 🎞️ Helper: Extract Single Frame from Video
-export const extractFrame = (videoPath, outputPath) => {
+ffmpeg.setFfmpegPath(ffmpegStatic);
+ffmpeg.setFfprobePath(ffprobe.path);
+
+export const stitchDynamicSequence = async (fileList, outputPath, metadata) => {
+  // Unique ID to prevent file collisions in Cloud Run's shared /tmp
+  const id = Date.now() + "_" + Math.floor(Math.random() * 1000);
+  const tmp = (name) => path.join(os.tmpdir(), `${id}_${name}`);
+
+  const tempFiles = {
+    n1: tmp("n1.mp4"),
+    n2: tmp("n2.mp4"),
+    intro: tmp("intro_stage.mp4"),
+    outro: tmp("outro_stage.mp4")
+  };
+
+  try {
+    const orientation = await detectOrientation(fileList[0]);
+    const target = orientation === "portrait" ? { w: 720, h: 1280 } : { w: 1280, h: 720 };
+
+    // Use absolute /tmp paths for normalization
+    await normalizeClip(fileList[1], tempFiles.n1, target); // fileList[1] is raw video
+    await normalizeClip(fileList[2], tempFiles.n2, target); // fileList[2] is edu video
+
+    console.log("✅ Clips normalized in /tmp");
+
+    await addIntroText(
+      tempFiles.n1,
+      tempFiles.intro,
+      metadata.vehicleName,
+      metadata.shopName,
+      target
+    );
+
+    console.log("✅ Intro added");
+
+    await createOutro(fileList[3], tempFiles.outro, target); // fileList[3] is outro image
+
+    console.log("✅ Outro created");
+
+    // Final stitch combines the newly created intro, the normalized edu clip, and outro
+    await stitchClips(
+      [tempFiles.intro, tempFiles.n2, tempFiles.outro],
+      outputPath
+    );
+
+    console.log("✅ Final video created");
+
+  } catch (error) {
+    console.error("❌ Stitching Error:", error);
+    throw error;
+  } finally {
+    // Delete only intermediate files, leaving the final outputPath
+    for (const file of Object.values(tempFiles)) {
+      try {
+        await fs.unlink(file);
+      } catch (e) { /* ignore */ }
+    }
+    console.log("🧹 Intermediate tmp files deleted");
+  }
+};
+
+/* -------------------------------- */
+/* ORIENTATION DETECTION            */
+/* -------------------------------- */
+
+const detectOrientation = (file) => {
   return new Promise((resolve, reject) => {
+    ffmpeg.ffprobe(file, (err, data) => {
+      if (err) return reject(err);
 
-    const folder = path.dirname(outputPath);
-    const filename = path.basename(outputPath);
+      const stream = data.streams.find(s => s.width);
 
-    ffmpeg(videoPath)
-      .screenshots({
-        count: 1,
-        folder: folder,      
-        filename: filename, 
-        timemarks: ['50%'],
-        size: '1280x720'
-      })
-      .on('end', () => resolve(outputPath))
-      .on('error', (err) => reject(err));
+      resolve(stream.height > stream.width ? "portrait" : "landscape");
+    });
   });
 };
 
-// ⚡ Helper: Stitch Videos Dynamically (with Smart Compression)
-export const stitchDynamicSequence = (fileList, outputPath) => {
+
+
+/* -------------------------------- */
+/* NORMALIZATION WITH BLUR PADDING  */
+/* -------------------------------- */
+
+const normalizeClip = (input, output, target) => {
+  const { w, h } = target;
+
   return new Promise((resolve, reject) => {
-    if (fileList.length === 0) return reject(new Error("No files provided for stitching."));
-    
-    // 1. Calculate Total Input Size in MB
-    let totalSizeInMB = 0;
-    try {
-      const totalBytes = fileList.reduce((acc, file) => acc + fs.statSync(file).size, 0);
-      totalSizeInMB = totalBytes / (1024 * 1024);
-      console.log(`📊 Total Input Size: ${totalSizeInMB.toFixed(2)} MB`);
-    } catch (err) {
-      console.warn("⚠️ Could not read file sizes. Defaulting to Size Priority.");
-      totalSizeInMB = 150; // Fallback to heavy compression if fs fails
-    }
 
-    // 2. Define Output Options dynamically based on your logic
-    let outputOptions = [
-      '-map [v]', 
-      '-map [a]',
-      '-c:v libx264',
-      '-movflags +faststart', // Essential for fast web playback
-      '-shortest'             // Stop encoding when the shortest stream ends
-    ];
+    const filter = `
+      [0:v]scale=${w}:${h}:force_original_aspect_ratio=increase,
+      boxblur=20:10,
+      crop=${w}:${h}[bg];
+      [0:v]scale=${w}:${h}:force_original_aspect_ratio=decrease[fg];
+      [bg][fg]overlay=(W-w)/2:(H-h)/2,
+      fps=30,settb=AVTB,format=yuv420p
+    `;
 
-    if (totalSizeInMB < 95) {
-      // ✨ < 100MB: Prioritize QUALITY and SPEED
-      console.log(" < 100MB: Prioritizing Quality & Speed (Superfast/CRF23)");
-      outputOptions.push(
-        '-preset superfast',   // Highest speed (sacrifices compression efficiency, but we don't care here)
-        '-crf 23',             // High visual quality
-        '-c:a aac',            // Compress audio
-        '-b:a 128k'            // Good audio quality
-      );
-    } else {
-      // 🗜️ >= 100MB: Prioritize SIZE and BALANCE (Speed/Quality)
-      console.log(" >= 100MB: Prioritizing Size (Fast/CRF28/Maxrate)");
-      outputOptions.push(
-        '-preset fast',        // Balanced speed (gives CPU time to actually compress the file)
-        '-crf 28',             // Lower quality / higher compression
-        '-maxrate 2.5M',       // Hard cap on video bitrate to prevent size spikes
-        '-bufsize 5M',         // Required when using maxrate
-        '-c:a aac',            // Compress audio
-        '-b:a 96k'             // Lower audio bitrate to save maximum space
-      );
-    }
+    ffmpeg(input)
+      .complexFilter(filter)
+      .audioFilters("aformat=sample_rates=44100:channel_layouts=stereo")
+      .outputOptions([
+        "-preset fast",
+        "-c:v libx264",
+        "-c:a aac"
+      ])
+      .on("end", () => resolve(output))
+      .on("error", reject)
+      .save(output);
+  });
+};
 
-    // 3. Build the complex filter for standardization (720p, 30fps)
-    const filterComplex = fileList.map((_, i) => {
-        return `[${i}:v]scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30,format=yuv420p[v${i}];[${i}:a]aformat=sample_rates=44100:channel_layouts=stereo[a${i}]`;
-    }).join(';');
 
-    const inputStreams = fileList.map((_, i) => `[v${i}][a${i}]`).join('');
 
-    // 4. Run FFmpeg
-    const command = ffmpeg();
-    fileList.forEach(file => command.input(file));
+/* -------------------------------- */
+/* INTRO TEXT                       */
+/* -------------------------------- */
 
-    console.log("⏳ Starting FFmpeg Stitching Process...");
-    
-    command
-      .complexFilter(`${filterComplex};${inputStreams}concat=n=${fileList.length}:v=1:a=1[v][a]`)
-      .outputOptions(outputOptions)
-      .output(outputPath)
-      .on('end', () => {
-          // Log the final output size so you can see if your logic worked
-          try {
-            const outSizeMB = fs.statSync(outputPath).size / (1024 * 1024);
-            console.log(`✅ Stitching Complete! Final Output Size: ${outSizeMB.toFixed(2)} MB`);
-          } catch (e) {
-            console.log("✅ Stitching Complete!");
+const addIntroText = (input, output, title, subtitle, target) => {
+  return new Promise((resolve, reject) => {
+    const { w, h } = target;
+    const iw_val = w < h ? w : w / 1.2;
+
+    // Relative path is safer on Windows to avoid the "C\:" drive letter crash
+    const fontPath = 'font.ttf'; 
+
+    const duration = 3;
+    const slideTime = 0.5;
+
+    // 3. TEXT MOVEMENT: Anchored to the center of the frame
+    const textMoveX = `if(lt(t,${slideTime}), -w+(t/${slideTime})*(w+(w-text_w)/2), if(gt(t,${duration-slideTime}), (w-text_w)/2+((t-(${duration-slideTime}))/${slideTime})*w, (w-text_w)/2))`;
+    ffmpeg(input)
+      .videoFilters([
+        // 1. BLACK BACKGROUND BAR
+        {
+          filter: "drawbox",
+          options: {
+            y: `${h / 2 - 80}`,
+            w: `${iw_val}`, h: 160,
+            color: "black@0.4", t: "fill",
+            enable: `between(t,0,${duration})`
           }
-          resolve(outputPath);
+        },
+        // 2. TOP WHITE LINE
+        {
+          filter: "drawbox",
+          options: {
+            y: `${h / 2 - 55}`,
+            w: `${iw_val}`, h: 3,
+            color: "white@0.8", t: "fill",
+            enable: `between(t,0,${duration})`
+          }
+        },
+        // 3. BOTTOM WHITE LINE
+        {
+          filter: "drawbox",
+          options: {
+            y: `${h / 2 + 25}`,
+            w: `${iw_val}`, h: 3,
+            color: "white@0.8", t: "fill",
+            enable: `between(t,0,${duration})`
+          }
+        },
+        // 4. VEHICLE NAME (Sliding Text)
+        {
+          filter: "drawtext",
+          options: {
+            text: title.toUpperCase(),
+            fontfile: fontPath,
+            fontsize: 56,
+            fontcolor: "white",
+            borderw: 1,
+            bordercolor: "white",
+            x: textMoveX,
+            y: `${h / 2 - 40}`,
+            enable: `between(t,0,${duration})`
+          }
+        },
+        // 5. SHOP NAME (Sliding Text)
+        {
+          filter: "drawtext",
+          options: {
+            text: subtitle,
+            fontfile: fontPath,
+            fontsize: 24,
+            fontcolor: "white",
+            borderw: 1,
+            bordercolor: "white",
+            x: textMoveX,
+            y: `${h / 2 + 35}`,
+            enable: `between(t,0,${duration})`
+          }
+        }
+      ])
+      .outputOptions(["-c:v libx264", "-preset veryfast", "-c:a copy"])
+      .on("end", () => resolve(output))
+      .on("error", (err) => {
+        console.error("❌ Intro Text Error:", err.message);
+        reject(err);
       })
-      .on('error', (err, stdout, stderr) => {
-          console.error("❌ FFmpeg Stitching Error:", stderr);
-          reject(err);
+      .save(output);
+  });
+};
+
+/* -------------------------------- */
+/* OUTRO IMAGE                      */
+/* -------------------------------- */
+
+const createOutro = (image, output, target) => {
+  const { w, h } = target;
+
+  return new Promise((resolve, reject) => {
+    const filter = `
+      [0:v]scale=${w}:${h}:force_original_aspect_ratio=increase,
+      boxblur=20:10,
+      crop=${w}:${h}[bg];
+      [0:v]scale=${w}:${h}:force_original_aspect_ratio=decrease[fg];
+      [bg][fg]overlay=(W-w)/2:(H-h)/2,format=yuv420p[vout];
+      [1:a]aformat=sample_rates=44100:channel_layouts=stereo[aout]
+    `;
+
+    ffmpeg()
+      .input(image)
+      .input('anullsrc=channel_layout=stereo:sample_rate=44100') // silent audio
+      .inputFormat('lavfi')
+      .duration(2)
+      .complexFilter(filter)
+      .map('[vout]')
+      .map('[aout]')
+      .outputOptions([
+        "-c:v libx264",
+        "-c:a aac",
+        "-movflags +faststart"
+      ])
+      .on("end", () => resolve(output))
+      .on("error", reject)
+      .save(output);
+  });
+};
+
+
+
+/* -------------------------------- */
+/* STITCH WITH TRANSITIONS          */
+/* -------------------------------- */
+const stitchClips = (clips, output) => {
+  return new Promise((resolve, reject) => {
+    const command = ffmpeg();
+    clips.forEach(c => command.input(c));
+
+    // Concatenate exactly 1 video and 1 audio stream from each input
+    command
+      .complexFilter([
+        `concat=n=${clips.length}:v=1:a=1 [v] [a]`
+      ])
+      .map("[v]")
+      .map("[a]")
+      .outputOptions([
+        "-c:v libx264",
+        "-preset medium",
+        "-c:a aac",
+        "-movflags +faststart"
+      ])
+      .on("end", () => {
+        console.log("🎬 Final stitching complete");
+        resolve(output);
       })
-      .run();
+      .on("error", (err) => {
+        console.error("❌ Stitching error:", err);
+        reject(err);
+      })
+      .save(output);
   });
 };
