@@ -59,7 +59,7 @@ export const stitchDynamicSequence = async (fileList, outputPath, metadata) => {
     await normalizeClip(fileList[1], tempFiles.n2, target); // fileList[1] is edu video
 
     console.log("✅ Clips normalized in /tmp");
-
+    console.log("Starting generating intro using ", metadata.vehicleName, " and ", metadata.shopName);
     await addIntroText(
       tempFiles.n1,
       tempFiles.intro,
@@ -159,8 +159,8 @@ const addIntroText = (input, output, title, subtitle, target) => {
     const iw_val = w < h ? w : w / 1.2;
 
     // Relative path is safer on Windows to avoid the "C\:" drive letter crash
-    const fontPath = 'font.ttf';
-
+    const fontPath = './font.ttf';
+    console.log("Using font path:", fontPath);
     const duration = 3;
     const slideTime = 0.5;
 
