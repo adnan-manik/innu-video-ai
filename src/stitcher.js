@@ -21,11 +21,11 @@ export const extractFrame = (inputPath, outputPath) => {
     ffmpeg(inputPath)
       .screenshots({
         // Extract frame at 3 second mark (or 0 if video is very short)
-        timestamps: [3], 
+        timestamps: [3],
         filename: filename,
         folder: folder,
         // Match your target resolution
-        size: '1280x720' 
+        size: '1280x720'
       })
       .on('end', () => {
         console.log(`✅ Frame extracted to: ${outputPath}`);
@@ -69,18 +69,22 @@ export const stitchDynamicSequence = async (fileList, outputPath, metadata) => {
     );
 
     console.log("✅ Intro added");
-    const logoPath = path.join("/video-app", metadata.shopLogo);
-  
-    await createOutro(logoPath, tempFiles.outro, target); // fileList[3] is outro image
-
-    console.log("✅ Outro created");
-
+    if (metadata.shopLogo) {
+      const logoPath = path.join("/video-app", metadata.shopLogo);
+      await createOutro(logoPath, tempFiles.outro, target);
+      console.log("✅ Outro created");
+      await stitchClips(
+        [tempFiles.intro, tempFiles.n2, tempFiles.outro],
+        outputPath
+      );
+    }
+    else {
+      await stitchClips(
+        [tempFiles.intro, tempFiles.n2],
+        outputPath
+      );
+    }
     // Final stitch combines the newly created intro, the normalized edu clip, and outro
-    await stitchClips(
-      [tempFiles.intro, tempFiles.n2, tempFiles.outro],
-      outputPath
-    );
-
     console.log("✅ Final video created");
 
   } catch (error) {
@@ -155,13 +159,13 @@ const addIntroText = (input, output, title, subtitle, target) => {
     const iw_val = w < h ? w : w / 1.2;
 
     // Relative path is safer on Windows to avoid the "C\:" drive letter crash
-    const fontPath = 'font.ttf'; 
+    const fontPath = 'font.ttf';
 
     const duration = 3;
     const slideTime = 0.5;
 
     // 3. TEXT MOVEMENT: Anchored to the center of the frame
-    const textMoveX = `if(lt(t,${slideTime}), -w+(t/${slideTime})*(w+(w-text_w)/2), if(gt(t,${duration-slideTime}), (w-text_w)/2+((t-(${duration-slideTime}))/${slideTime})*w, (w-text_w)/2))`;
+    const textMoveX = `if(lt(t,${slideTime}), -w+(t/${slideTime})*(w+(w-text_w)/2), if(gt(t,${duration - slideTime}), (w-text_w)/2+((t-(${duration - slideTime}))/${slideTime})*w, (w-text_w)/2))`;
     ffmpeg(input)
       .videoFilters([
         // 1. BLACK BACKGROUND BAR
