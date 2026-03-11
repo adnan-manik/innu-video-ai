@@ -8,7 +8,7 @@ import { stitchDynamicSequence, extractFrame } from "./stitcher.js";
 import { extractAudio } from "./extractAudio.js";
 
 // Mount points exactly as shown in your Cloud Run configuration
-const VIDEO_BUCKET = "/video-app"; 
+const VIDEO_BUCKET = "/video-app";
 const LIBRARY_BUCKET = "/edu_videos";
 
 /**
@@ -18,16 +18,45 @@ const getMetadata = async (rawPath) => {
   const query = `
     SELECT 
       s.name as shop_name, 
-      CONCAT(o.vehicle_make, ' ', o.vehicle_model) as vehicle_name,
-      s.logo_url as shop_logo
+      o.vehicle_info,
+      s.id as shop_id
     FROM videos v
     JOIN orders o ON v.order_id = o.id
     JOIN shops s ON o.shop_id = s.id
     WHERE v.raw_video_path = $1
     LIMIT 1;
   `;
+
   const result = await db.query(query, [rawPath]);
-  return result.rows[0];
+  let data;
+
+  if (result.rows.length === 0) {
+    console.warn(`⚠️ No metadata found for ${rawPath}, using defaults`);
+    data = {
+      shopName: "Service Inspection",
+      vehicleName: "Vehicle",
+      shopLogo: null
+    };
+  } else {
+    const row = result.rows[0];
+    
+    // Parse the JSONB vehicle_info column
+    let vehicleInfo = {};
+    try {
+      vehicleInfo = typeof row.vehicle_info === 'string' 
+        ? JSON.parse(row.vehicle_info) 
+        : row.vehicle_info;
+    } catch (e) {
+      console.error("Error parsing vehicle_info:", e);
+    }
+
+    data = {
+      vehicleName: `${vehicleInfo.make || ''} ${vehicleInfo.model || ''}`.trim(),
+      shopName: row.shop_name,
+      shopLogo: path.join(VIDEO_BUCKET, "shop_logo", `${row.shop_id}.png`)
+    };
+  }
+  return data;
 };
 
 /**
@@ -55,11 +84,11 @@ export const processVideoJob = async (fileEvent) => {
     audio: `/tmp/${jobId}_audio.mp3`,
     frame: `/tmp/${jobId}_frame.jpg`,
   };
-  
+
   try {
     await updateVideoStatus(rawPath, "processing", "Performing AI Analysis...");
     const rawInput = path.join(VIDEO_BUCKET, rawPath);
-    
+
     // 1. AI PIPELINE
     const [tempFrame, transcription] = await Promise.all([
       extractFrame(rawInput, tmp.frame),
@@ -85,11 +114,11 @@ export const processVideoJob = async (fileEvent) => {
 
     // 3. STITCHING (Sequential to avoid race conditions)
     await updateVideoStatus(rawPath, "processing", "Stitching final video...");
-    
+
     const eduVideo = path.join(LIBRARY_BUCKET, matches[0].video_url);
     const finalOutput = path.join(VIDEO_BUCKET, rawPath.replace("raw/", "processed/"));
     const thumbnailPath = path.join(VIDEO_BUCKET, rawPath.replace("raw/", "thumbnails/").replace(".mp4", ".jpg"));
-    
+
     const metadata = await getMetadata(rawPath);
 
     // Run stitcher, THEN extract frame from the result
@@ -109,7 +138,7 @@ export const processVideoJob = async (fileEvent) => {
     console.error(`❌ Process Error:`, e);
     await updateVideoStatus(rawPath, "failed", "internal processing error");
   } finally {
-    await Promise.all(Object.values(tmp).map(f => fs.unlink(f).catch(() => {})));
+    await Promise.all(Object.values(tmp).map(f => fs.unlink(f).catch(() => { })));
   }
 };
 
@@ -142,9 +171,9 @@ export const processRestitchJob = async (video) => {
     await updateVideoStatus(rawPath, "completed", "Video restitched successfully", {
       stitched_video_url: finalOutput,
       thumbnail_url: thumbnailPath,
-      detected_keywords: JSON.stringify({ 
-        problem: eduResult.rows[0].title, 
-        category: eduResult.rows[0].category 
+      detected_keywords: JSON.stringify({
+        problem: eduResult.rows[0].title,
+        category: eduResult.rows[0].category
       }),
       edu_video_id: video.edu_video_id
     });
@@ -153,6 +182,6 @@ export const processRestitchJob = async (video) => {
     console.error(`❌ Restitch Error:`, e);
     await updateVideoStatus(rawPath, "failed", "internal restitch error");
   } finally {
-    await Promise.all(Object.values(tmp).map(f => fs.unlink(f).catch(() => {})));
+    await Promise.all(Object.values(tmp).map(f => fs.unlink(f).catch(() => { })));
   }
 };
