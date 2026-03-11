@@ -8,6 +8,36 @@ import fs from "fs/promises";
 ffmpeg.setFfmpegPath(ffmpegStatic);
 ffmpeg.setFfprobePath(ffprobe.path);
 
+/**
+ * Extracts a high-quality thumbnail from a video file.
+ * Compatible with GCS FUSE mount paths.
+ */
+export const extractFrame = (inputPath, outputPath) => {
+  return new Promise((resolve, reject) => {
+    // Ensure the output directory exists on the mount
+    const folder = path.dirname(outputPath);
+    const filename = path.basename(outputPath);
+
+    ffmpeg(inputPath)
+      .screenshots({
+        // Extract frame at 3 second mark (or 0 if video is very short)
+        timestamps: [3], 
+        filename: filename,
+        folder: folder,
+        // Match your target resolution
+        size: '1280x720' 
+      })
+      .on('end', () => {
+        console.log(`✅ Frame extracted to: ${outputPath}`);
+        resolve(outputPath);
+      })
+      .on('error', (err) => {
+        console.error(`❌ Frame extraction error: ${err.message}`);
+        reject(err);
+      });
+  });
+};
+
 export const stitchDynamicSequence = async (fileList, outputPath, metadata) => {
   // Unique ID to prevent file collisions in Cloud Run's shared /tmp
   const id = Date.now() + "_" + Math.floor(Math.random() * 1000);
@@ -25,8 +55,8 @@ export const stitchDynamicSequence = async (fileList, outputPath, metadata) => {
     const target = orientation === "portrait" ? { w: 720, h: 1280 } : { w: 1280, h: 720 };
 
     // Use absolute /tmp paths for normalization
-    await normalizeClip(fileList[1], tempFiles.n1, target); // fileList[1] is raw video
-    await normalizeClip(fileList[2], tempFiles.n2, target); // fileList[2] is edu video
+    await normalizeClip(fileList[0], tempFiles.n1, target); // fileList[0] is raw video
+    await normalizeClip(fileList[1], tempFiles.n2, target); // fileList[1] is edu video
 
     console.log("✅ Clips normalized in /tmp");
 
@@ -39,8 +69,9 @@ export const stitchDynamicSequence = async (fileList, outputPath, metadata) => {
     );
 
     console.log("✅ Intro added");
-
-    await createOutro(fileList[3], tempFiles.outro, target); // fileList[3] is outro image
+    const logoPath = path.join("/video-app", metadata.shopLogo);
+  
+    await createOutro(logoPath, tempFiles.outro, target); // fileList[3] is outro image
 
     console.log("✅ Outro created");
 
@@ -82,8 +113,6 @@ const detectOrientation = (file) => {
   });
 };
 
-
-
 /* -------------------------------- */
 /* NORMALIZATION WITH BLUR PADDING  */
 /* -------------------------------- */
@@ -115,8 +144,6 @@ const normalizeClip = (input, output, target) => {
       .save(output);
   });
 };
-
-
 
 /* -------------------------------- */
 /* INTRO TEXT                       */
@@ -243,8 +270,6 @@ const createOutro = (image, output, target) => {
       .save(output);
   });
 };
-
-
 
 /* -------------------------------- */
 /* STITCH WITH TRANSITIONS          */

@@ -4,11 +4,14 @@ export const findEducationalContent = async (aiAnalysis) => {
   const matches = [];
   const issues = aiAnalysis.issues || [];
   
-  // Track unique video IDs to see if multiple problems point to the same video
-  const uniqueVideoIds = new Set();
+  // Track unique video URLs and unique categories found
+  const uniqueVideoUrls = new Set();
+  const uniqueCategories = new Set();
+  let specificMatchesCount = 0;
 
   for (const issue of issues) {
     let videoMatch = null;
+    if (issue.category) uniqueCategories.add(issue.category);
 
     // PHASE 1: SPECIFIC SEARCH
     const specificKeywords = issue.keywords || [];
@@ -28,23 +31,13 @@ export const findEducationalContent = async (aiAnalysis) => {
         const result = await db.query(query, [searchTerms, issue.category]);
         if (result.rows.length > 0) {
           videoMatch = result.rows[0];
+          specificMatchesCount++;
         }
       } catch (e) { console.error("Search error", e); }
     }
 
-    // PHASE 2: FALLBACK to Motovisuals/{category}/{category}
-    // If no specific video found, create a match using the category path
-    if (!videoMatch && issue.category) {
-      console.log(`🛟 Falling back to Motovisuals path for category: ${issue.category}`);
-      videoMatch = {
-        title: `${issue.category} Overview`,
-        // Constructing the path as requested: Motovisuals/Category/Category
-        video_url: `Motovisuals/${issue.category}/${issue.category}.mp4` 
-      };
-    }
-
     if (videoMatch) {
-      uniqueVideoIds.add(videoMatch.video_url);
+      uniqueVideoUrls.add(videoMatch.video_url);
       matches.push({
         problem: issue.problem,
         category: issue.category,
@@ -53,15 +46,33 @@ export const findEducationalContent = async (aiAnalysis) => {
         video_url: videoMatch.video_url,
         title: videoMatch.title
       });
+    } else if (issue.category) {
+      uniqueCategories.add(issue.category);
     }
   }
 
-  // LOGIC: If multiple problems point to the EXACT SAME video URL, we treat it as one.
-  // If they point to DIFFERENT videos, we must reject.
-  if (uniqueVideoIds.size > 1) {
-    throw new Error("FOCUS_LIMIT_EXCEEDED");
+  // LOGIC 1: If issues span multiple DIFFERENT categories, reject immediately (Not related)
+  if (uniqueCategories.size > 1) {
+    throw new Error("FOCUS_LIMIT_EXCEEDED"); // All issues must be related to the same system
   }
 
-  // Return only the first match (since they are all either the same or there is only one)
+  const primaryCategory = Array.from(uniqueCategories)[0];
+  
+  const needsOverview = 
+    uniqueVideoUrls.size > 1 ||           // Multiple specific videos found
+    specificMatchesCount < issues.length || // Some issues didn't have a specific match
+    uniqueVideoUrls.size === 0;            // No matches found at all
+
+  if (needsOverview && primaryCategory) {
+    console.log(`🛟 Falling back to overview for: ${primaryCategory}`);
+    return [{
+      problem: "Multiple Issues Detected",
+      category: primaryCategory,
+      video_url: `Motovisuals/${primaryCategory}/${primaryCategory}.mp4`,
+      title: `${primaryCategory} Overview`
+    }];
+  }
+
+  // LOGIC 3: Return the single specific match if only one distinct video was found for all issues
   return matches.length > 0 ? [matches[0]] : [];
-};
+}
