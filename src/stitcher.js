@@ -229,27 +229,18 @@ const stitchClips = (clips, output) => {
     const command = ffmpeg();
     clips.forEach(c => command.input(c));
 
-    // Add silent audio to any clip that lacks it before concat
-    const filterInputs = clips.map((_, i) => 
-      `[${i}:v]setpts=PTS-STARTPTS[v${i}];` +
-      `[${i}:a]asetpts=PTS-STARTPTS[a${i}]`
-    ).join(';');
-
-    const vInputs = clips.map((_, i) => `[v${i}]`).join('');
-    const aInputs = clips.map((_, i) => `[a${i}]`).join('');
-
     command
       .complexFilter([
-        `${filterInputs};${vInputs}${aInputs}concat=n=${clips.length}:v=1:a=1[v][a]`
+        `concat=n=${clips.length}:v=1:a=1 [v] [a]`
       ])
       .map("[v]")
       .map("[a]")
       .outputOptions([
-        `-c:v`, `libx264`,
-        `-preset`, `fast`,
-        `-c:a`, `aac`,
-        `-movflags`, `+faststart`,
-        `-threads`, `8`
+        "-c:v libx264",
+        "-preset medium",
+        "-c:a aac",
+        "-movflags +faststart",
+        "-threads 8"
       ])
       .on("end", () => {
         console.log("🎬 Final stitching complete");

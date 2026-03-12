@@ -6,14 +6,12 @@ import { transcribeAudio, analyzeTranscriptionWithVision } from "./ai.js";
 import { findEducationalContent } from "./library.js";
 import { stitchDynamicSequence, extractFrame } from "./stitcher.js";
 import { extractAudio } from "./extractAudio.js";
+import { existsSync } from "fs";
 
-// Mount points exactly as shown in your Cloud Run configuration
+// Mount points 
 const VIDEO_BUCKET = "/video-app";
 const LIBRARY_BUCKET = "/edu_videos";
 
-/**
- * Retrieves shop and vehicle metadata via database joins
- */
 const getMetadata = async (rawPath) => {
   const query = `
     SELECT 
@@ -49,19 +47,17 @@ const getMetadata = async (rawPath) => {
     } catch (e) {
       console.error("Error parsing vehicle_info:", e);
     }
-
+    const shopLogoPath = path.join(VIDEO_BUCKET, "shop_logo", `${row.shop_id}.png`);
     data = {
       vehicleName: `${vehicleInfo.make || ''} ${vehicleInfo.model || ''}`.trim(),
       shopName: row.shop_name,
-      shopLogo: path.join(VIDEO_BUCKET, "shop_logo", `${row.shop_id}.png`)
+      shopLogo: existsSync(shopLogoPath) ? shopLogoPath : null
     };
   }
   return data;
 };
 
-/**
- * Updates video status in the database
- */
+
 async function updateVideoStatus(rawPath, status, message, extraFields = {}) {
   const sets = [`status = $1`, `message = $2`, `updated_at = NOW()`];
   const params = [status, message, rawPath];
@@ -84,7 +80,7 @@ export const processVideoJob = async (fileEvent) => {
     audio: `/tmp/${jobId}_audio.mp3`,
     frame: `/tmp/${jobId}_frame.jpg`,
   };
-
+  console.log(`🎬 Starting processing for: ${rawPath}`);
   try {
     await updateVideoStatus(rawPath, "processing", "Performing AI Analysis...");
     const rawInput = path.join(VIDEO_BUCKET, rawPath);
@@ -101,17 +97,32 @@ export const processVideoJob = async (fileEvent) => {
     const analysis = await analyzeTranscriptionWithVision(transcription, tempFrame);
 
     if (!analysis?.issues?.length) {
+      console.log("No issues detected by AI, marking as failed");
       return await updateVideoStatus(rawPath, "failed", "no issues detected by AI");
     }
-
+    console.log(`✅ AI analysis complete, Finding educationl video`);
     // 2. CONTENT MATCHING
     await updateVideoStatus(rawPath, "processing", "Matching educational content...");
-    const matches = await findEducationalContent(analysis);
-
-    if (!matches?.length) {
-      return await updateVideoStatus(rawPath, "failed", "no content match found");
+    let matches;
+    try {
+      matches = await findEducationalContent(analysis);
+    } catch (err) {
+      const msg =
+        err.message === "FOCUS_LIMIT_EXCEEDED"
+          ? "focus on one problem at a time"
+          : "Internal matching error";
+      return await updateVideoStatus(rawPath, "failed", msg);
     }
 
+    if (!matches?.length) {
+      return await updateVideoStatus(
+        rawPath,
+        "failed",
+        "no educational content found for detected issues",
+      );
+    }
+    
+      console.log(`✅ Content matching complete, found ${matches.length} matches`);
     // 3. STITCHING (Sequential to avoid race conditions)
     await updateVideoStatus(rawPath, "processing", "Stitching final video...");
 
@@ -133,7 +144,7 @@ export const processVideoJob = async (fileEvent) => {
       detected_keywords: JSON.stringify(analysis.issues),
       edu_video_id: matches[0].library_id
     });
-
+    console.log(`✅ Processing complete for: ${rawPath}`);
   } catch (e) {
     console.error(`❌ Process Error:`, e);
     await updateVideoStatus(rawPath, "failed", "internal processing error");
@@ -147,6 +158,8 @@ export const processRestitchJob = async (video) => {
   const jobId = uuidv4();
   const tmp = { frame: `/tmp/${jobId}_frame.jpg` };
 
+  console.log(`🎬 Starting restitching for: ${rawPath}`);
+  
   try {
     await updateVideoStatus(rawPath, "processing", "Restitching video...");
 
@@ -156,6 +169,7 @@ export const processRestitchJob = async (video) => {
     ]);
 
     if (!eduResult.rows.length) {
+      console.warn(`⚠️ Educational video not found for edu_video_id: ${video.edu_video_id}`);
       return await updateVideoStatus(rawPath, "failed", "Educational video not found");
     }
 
@@ -164,6 +178,7 @@ export const processRestitchJob = async (video) => {
     const finalOutput = path.join(VIDEO_BUCKET, rawPath.replace("raw/", "processed/").replace(".mp4", "_restitched.mp4"));
     const thumbnailPath = path.join(VIDEO_BUCKET, rawPath.replace("raw/", "thumbnails/").replace(".mp4", "_restitched.jpg"));
 
+    console.log("Starting Sticthing...");
     // Sequential: Wait for stitch before frame extraction
     await stitchDynamicSequence([rawInput, eduVideo], finalOutput, metadata);
     await extractFrame(finalOutput, thumbnailPath);
@@ -177,7 +192,7 @@ export const processRestitchJob = async (video) => {
       }),
       edu_video_id: video.edu_video_id
     });
-
+      console.log(`✅ Restitching complete for: ${rawPath}`);
   } catch (e) {
     console.error(`❌ Restitch Error:`, e);
     await updateVideoStatus(rawPath, "failed", "internal restitch error");
