@@ -68,7 +68,7 @@ export const stitchDynamicSequence = async (fileList, outputPath, metadata) => {
       const logoPath = path.join("/video-app", metadata.shopLogo);
       await createOutro(logoPath, tempFiles.outro, target);
       console.log("✅ Outro created");
-      
+
       await stitchClips([tempFiles.n1, tempFiles.n2, tempFiles.outro], outputPath);
     } else {
       await stitchClips([tempFiles.n1, tempFiles.n2], outputPath);
@@ -191,29 +191,29 @@ const createOutro = (image, output, target) => {
 
   return new Promise((resolve, reject) => {
     const filter = `
-      [0:v]scale=${w}:${h}:force_original_aspect_ratio=increase,
+      [0:v]loop=loop=-1:size=1:start=0,
+      scale=${w}:${h}:force_original_aspect_ratio=increase,
       boxblur=20:10,
-      crop=${w}:${h}[bg];
-      [0:v]scale=${w}:${h}:force_original_aspect_ratio=decrease[fg];
-      [bg][fg]overlay=(W-w)/2:(H-h)/2,format=yuv420p[vout];
-      [1:a]aformat=sample_rates=44100:channel_layouts=stereo[aout]
+      crop=${w}:${h},
+      trim=duration=2,
+      format=yuv420p[vout]
     `;
 
     ffmpeg()
       .input(image)
-      .input('anullsrc=channel_layout=stereo:sample_rate=44100') // silent audio
-      .inputFormat('lavfi')
-      .duration(2)
       .complexFilter(filter)
       .map('[vout]')
-      .map('[aout]')
       .outputOptions([
-        "-c:v libx264",
-        "-c:a aac",
-        "-movflags +faststart"
+        `-t`, `2`,
+        `-c:v`, `libx264`,
+        `-an`,                    // no audio track — stitchClips handles concat
+        `-movflags`, `+faststart`
       ])
       .on("end", () => resolve(output))
-      .on("error", reject)
+      .on("error", (err) => {
+        console.error("❌ Outro Error:", err.message);
+        reject(err);
+      })
       .save(output);
   });
 };
@@ -226,18 +226,26 @@ const stitchClips = (clips, output) => {
     const command = ffmpeg();
     clips.forEach(c => command.input(c));
 
-    // Concatenate exactly 1 video and 1 audio stream from each input
+    // Add silent audio to any clip that lacks it before concat
+    const filterInputs = clips.map((_, i) => 
+      `[${i}:v]setpts=PTS-STARTPTS[v${i}];` +
+      `[${i}:a]asetpts=PTS-STARTPTS[a${i}]`
+    ).join(';');
+
+    const vInputs = clips.map((_, i) => `[v${i}]`).join('');
+    const aInputs = clips.map((_, i) => `[a${i}]`).join('');
+
     command
       .complexFilter([
-        `concat=n=${clips.length}:v=1:a=1 [v] [a]`
+        `${filterInputs};${vInputs}${aInputs}concat=n=${clips.length}:v=1:a=1[v][a]`
       ])
       .map("[v]")
       .map("[a]")
       .outputOptions([
-        "-c:v libx264",
-        "-preset medium",
-        "-c:a aac",
-        "-movflags +faststart"
+        `-c:v`, `libx264`,
+        `-preset`, `medium`,
+        `-c:a`, `aac`,
+        `-movflags`, `+faststart`
       ])
       .on("end", () => {
         console.log("🎬 Final stitching complete");
