@@ -161,37 +161,30 @@ const addIntroText = (input, output, title, subtitle, target) => {
 
     const duration = 3;
     const slideTime = 0.5;
-
     const centerX = Math.floor((w - iw_val) / 2);
 
-    // Remove ALL spaces from expressions — ffmpeg is very sensitive to spaces in filter_complex
-    const moveX = `if(lt(t,${slideTime}),-${iw_val}+(t/${slideTime})*(${centerX}+${iw_val}),if(gt(t,${duration - slideTime}),${centerX}+((t-(${duration - slideTime}))/${slideTime})*(w-${centerX}),${centerX}))`;
-    const textMoveX = `if(lt(t,${slideTime}),-w+(t/${slideTime})*(w+(w-text_w)/2),if(gt(t,${duration - slideTime}),(w-text_w)/2+((t-(${duration - slideTime}))/${slideTime})*w,(w-text_w)/2))`;
+    const moveX = `if(lt(t,${slideTime}),-${iw_val}+(t/${slideTime})*(${centerX}+${iw_val}),if(gt(t,${duration-slideTime}),${centerX}+((t-(${duration-slideTime}))/${slideTime})*(w-${centerX}),${centerX}))`;
+    const textMoveX = `if(lt(t,${slideTime}),-w+(t/${slideTime})*(w+(w-text_w)/2),if(gt(t,${duration-slideTime}),(w-text_w)/2+((t-(${duration-slideTime}))/${slideTime})*w,(w-text_w)/2))`;
 
-    const titleText = title.toUpperCase().replace(/'/g, "\u2019"); // escape single quotes
+    const titleText = title.toUpperCase().replace(/'/g, "\u2019");
     const subtitleText = subtitle.replace(/'/g, "\u2019");
 
-    // Pass as ARRAY — fluent-ffmpeg joins them with ',' internally but keeps expressions intact
-    const filters = [
-      // 1. Black background bar
-      `drawbox=x=${moveX}:y=${h / 2 - 80}:w=${iw_val}:h=160:color=black@0.4:t=fill:enable='between(t,0,${duration})'`,
-      // 2. Top white line
-      `drawbox=x=${moveX}:y=${h / 2 - 55}:w=${iw_val}:h=3:color=white@0.8:t=fill:enable='between(t,0,${duration})'`,
-      // 3. Bottom white line
-      `drawbox=x=${moveX}:y=${h / 2 + 25}:w=${iw_val}:h=3:color=white@0.8:t=fill:enable='between(t,0,${duration})'`,
-      // 4. Vehicle name
-      `drawtext=text='${titleText}':fontfile=${fontPath}:fontsize=56:fontcolor=white:borderw=1:bordercolor=white:x=${textMoveX}:y=${h / 2 - 40}:enable='between(t,0,${duration})'`,
-      // 5. Shop name
-      `drawtext=text='${subtitleText}':fontfile=${fontPath}:fontsize=24:fontcolor=white:borderw=1:bordercolor=white:x=${textMoveX}:y=${h / 2 + 35}:enable='between(t,0,${duration})'`
-    ];
+    // Build the filter string manually with commas — do NOT use .complexFilter()
+    const filterString = [
+      `drawbox=x=${moveX}:y=${h/2-80}:w=${iw_val}:h=160:color=black@0.4:t=fill:enable='between(t,0,${duration})'`,
+      `drawbox=x=${moveX}:y=${h/2-55}:w=${iw_val}:h=3:color=white@0.8:t=fill:enable='between(t,0,${duration})'`,
+      `drawbox=x=${moveX}:y=${h/2+25}:w=${iw_val}:h=3:color=white@0.8:t=fill:enable='between(t,0,${duration})'`,
+      `drawtext=text='${titleText}':fontfile=${fontPath}:fontsize=56:fontcolor=white:borderw=1:bordercolor=white:x=${textMoveX}:y=${h/2-40}:enable='between(t,0,${duration})'`,
+      `drawtext=text='${subtitleText}':fontfile=${fontPath}:fontsize=24:fontcolor=white:borderw=1:bordercolor=white:x=${textMoveX}:y=${h/2+35}:enable='between(t,0,${duration})'`
+    ].join(',');  // ← commas, not semicolons
 
     ffmpeg(input)
-      .complexFilter(filters)   // ← Pass array, NOT joined string
       .outputOptions([
-        "-c:v libx264",
-        "-preset superfast",
-        "-crf 23",
-        "-c:a copy"
+        `-filter_complex`, filterString,   // ← passed as TWO separate args, not one string
+        `-c:v`, `libx264`,
+        `-preset`, `superfast`,
+        `-crf`, `23`,
+        `-c:a`, `copy`
       ])
       .on("start", (cmd) => console.log("🚀 FFmpeg Command:", cmd))
       .on("end", () => resolve(output))
