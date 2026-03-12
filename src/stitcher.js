@@ -65,8 +65,7 @@ export const stitchDynamicSequence = async (fileList, outputPath, metadata) => {
     // ────────────────────────────────────────────────────────────────────────
 
     if (metadata.shopLogo) {
-      const logoPath = path.join("/video-app", metadata.shopLogo);
-      await createOutro(logoPath, tempFiles.outro, target);
+      await createOutro(metadata.shopLogo, tempFiles.outro, target);
       console.log("✅ Outro created");
 
       await stitchClips([tempFiles.n1, tempFiles.n2, tempFiles.outro], outputPath);
@@ -127,7 +126,8 @@ const normalizeClip = (input, output, target) => {
       .outputOptions([
         "-preset fast",
         "-c:v libx264",
-        "-c:a aac"
+        "-c:a aac",
+        "-threads 8"
       ])
       .on("end", () => resolve(output))
       .on("error", reject)
@@ -190,7 +190,7 @@ const createOutro = (image, output, target) => {
   const { w, h } = target;
 
   return new Promise((resolve, reject) => {
-    const filter = `
+    const videoFilter = `
       [0:v]loop=loop=-1:size=1:start=0,
       scale=${w}:${h}:force_original_aspect_ratio=increase,
       boxblur=20:10,
@@ -199,14 +199,17 @@ const createOutro = (image, output, target) => {
       format=yuv420p[vout]
     `;
 
+    const audioFilter = `aevalsrc=0:c=stereo:s=44100:d=2[aout]`;
+
     ffmpeg()
       .input(image)
-      .complexFilter(filter)
+      .complexFilter(`${videoFilter};${audioFilter}`)
       .map('[vout]')
+      .map('[aout]')
       .outputOptions([
         `-t`, `2`,
         `-c:v`, `libx264`,
-        `-an`,                    // no audio track — stitchClips handles concat
+        `-c:a`, `aac`,
         `-movflags`, `+faststart`
       ])
       .on("end", () => resolve(output))
@@ -243,9 +246,10 @@ const stitchClips = (clips, output) => {
       .map("[a]")
       .outputOptions([
         `-c:v`, `libx264`,
-        `-preset`, `medium`,
+        `-preset`, `fast`,
         `-c:a`, `aac`,
-        `-movflags`, `+faststart`
+        `-movflags`, `+faststart`,
+        `-threads`, `8`
       ])
       .on("end", () => {
         console.log("🎬 Final stitching complete");
