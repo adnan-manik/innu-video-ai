@@ -39,14 +39,13 @@ export const extractFrame = (inputPath, outputPath) => {
 };
 
 export const stitchDynamicSequence = async (fileList, outputPath, metadata) => {
-  // Unique ID to prevent file collisions in Cloud Run's shared /tmp
   const id = Date.now() + "_" + Math.floor(Math.random() * 1000);
   const tmp = (name) => path.join(os.tmpdir(), `${id}_${name}`);
 
   const tempFiles = {
     n1: tmp("n1.mp4"),
     n2: tmp("n2.mp4"),
-    intro: tmp("intro_stage.mp4"),
+    // intro: tmp("intro_stage.mp4"),  // disabled
     outro: tmp("outro_stage.mp4")
   };
 
@@ -54,48 +53,35 @@ export const stitchDynamicSequence = async (fileList, outputPath, metadata) => {
     const orientation = await detectOrientation(fileList[0]);
     const target = orientation === "portrait" ? { w: 720, h: 1280 } : { w: 1280, h: 720 };
 
-    // Use absolute /tmp paths for normalization
-    await normalizeClip(fileList[0], tempFiles.n1, target); // fileList[0] is raw video
-    await normalizeClip(fileList[1], tempFiles.n2, target); // fileList[1] is edu video
+    await normalizeClip(fileList[0], tempFiles.n1, target);
+    await normalizeClip(fileList[1], tempFiles.n2, target);
 
     console.log("✅ Clips normalized in /tmp");
-    console.log("Starting generating intro using ", metadata.vehicleName, " and ", metadata.shopName);
-    await addIntroText(
-      tempFiles.n1,
-      tempFiles.intro,
-      metadata.vehicleName,
-      metadata.shopName,
-      target
-    );
 
-    console.log("✅ Intro added");
+    // ── Intro text disabled ──────────────────────────────────────────────────
+    // console.log("Starting generating intro using ", metadata.vehicleName, " and ", metadata.shopName);
+    // await addIntroText(tempFiles.n1, tempFiles.intro, metadata.vehicleName, metadata.shopName, target);
+    // console.log("✅ Intro added");
+    // ────────────────────────────────────────────────────────────────────────
+
     if (metadata.shopLogo) {
       const logoPath = path.join("/video-app", metadata.shopLogo);
       await createOutro(logoPath, tempFiles.outro, target);
       console.log("✅ Outro created");
-      await stitchClips(
-        [tempFiles.intro, tempFiles.n2, tempFiles.outro],
-        outputPath
-      );
+      
+      await stitchClips([tempFiles.n1, tempFiles.n2, tempFiles.outro], outputPath);
+    } else {
+      await stitchClips([tempFiles.n1, tempFiles.n2], outputPath);
     }
-    else {
-      await stitchClips(
-        [tempFiles.intro, tempFiles.n2],
-        outputPath
-      );
-    }
-    // Final stitch combines the newly created intro, the normalized edu clip, and outro
+
     console.log("✅ Final video created");
 
   } catch (error) {
     console.error("❌ Stitching Error:", error);
     throw error;
   } finally {
-    // Delete only intermediate files, leaving the final outputPath
     for (const file of Object.values(tempFiles)) {
-      try {
-        await fs.unlink(file);
-      } catch (e) { /* ignore */ }
+      try { await fs.unlink(file); } catch (e) { /* ignore */ }
     }
     console.log("🧹 Intermediate tmp files deleted");
   }
