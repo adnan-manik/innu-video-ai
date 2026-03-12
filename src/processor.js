@@ -37,12 +37,12 @@ const getMetadata = async (rawPath) => {
     };
   } else {
     const row = result.rows[0];
-    
+
     // Parse the JSONB vehicle_info column
     let vehicleInfo = {};
     try {
-      vehicleInfo = typeof row.vehicle_info === 'string' 
-        ? JSON.parse(row.vehicle_info) 
+      vehicleInfo = typeof row.vehicle_info === 'string'
+        ? JSON.parse(row.vehicle_info)
         : row.vehicle_info;
     } catch (e) {
       console.error("Error parsing vehicle_info:", e);
@@ -121,8 +121,8 @@ export const processVideoJob = async (fileEvent) => {
         "no educational content found for detected issues",
       );
     }
-    
-      console.log(`✅ Content matching complete, found ${matches.length} matches`);
+
+    console.log(`✅ Content matching complete, found ${matches.length} matches`);
     // 3. STITCHING (Sequential to avoid race conditions)
     await updateVideoStatus(rawPath, "processing", "Stitching final video...");
 
@@ -159,7 +159,7 @@ export const processRestitchJob = async (video) => {
   const tmp = { frame: `/tmp/${jobId}_frame.jpg` };
 
   console.log(`🎬 Starting restitching for: ${rawPath}`);
-  
+
   try {
     await updateVideoStatus(rawPath, "processing", "Restitching video...");
 
@@ -183,16 +183,22 @@ export const processRestitchJob = async (video) => {
     await stitchDynamicSequence([rawInput, eduVideo], finalOutput, metadata);
     await extractFrame(finalOutput, thumbnailPath);
 
+    if(!video.detected_keywords || video.detected_keywords === "[]" || video.detected_keywords === "{}") {
+      video.detected_keywords = JSON.stringify([{
+        problem: eduResult.rows[0].title,
+        category: eduResult.rows[0].category,
+        keywords: []
+      }]);
+    }
+
+
     await updateVideoStatus(rawPath, "completed", "Video restitched successfully", {
       stitched_video_url: finalOutput,
       thumbnail_url: thumbnailPath,
-      detected_keywords: JSON.stringify({
-        problem: eduResult.rows[0].title,
-        category: eduResult.rows[0].category
-      }),
+      detected_keywords: video.detected_keywords,
       edu_video_id: video.edu_video_id
     });
-      console.log(`✅ Restitching complete for: ${rawPath}`);
+    console.log(`✅ Restitching complete for: ${rawPath}`);
   } catch (e) {
     console.error(`❌ Restitch Error:`, e);
     await updateVideoStatus(rawPath, "failed", "internal restitch error");
