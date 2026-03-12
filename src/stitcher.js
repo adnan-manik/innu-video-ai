@@ -224,29 +224,31 @@ const createOutro = (image, output, target) => {
 /* -------------------------------- */
 /* STITCH WITH TRANSITIONS          */
 /* -------------------------------- */
-const stitchClips = (clips, output) => {
-  return new Promise((resolve, reject) => {
-    const command = ffmpeg();
-    clips.forEach(c => command.input(c));
+const stitchClips = async (clips, output) => {
+  const id = Date.now();
+  const listFile = path.join(os.tmpdir(), `${id}_concat.txt`);
+  
+  const content = clips.map(c => `file '${c}'`).join('\n');
+  await fs.writeFile(listFile, content);
 
-    command
-      .complexFilter([
-        `concat=n=${clips.length}:v=1:a=1 [v] [a]`
-      ])
-      .map("[v]")
-      .map("[a]")
+  return new Promise((resolve, reject) => {
+    ffmpeg()
+      .input(listFile)
+      .inputOptions(['-f', 'concat', '-safe', '0'])
       .outputOptions([
-        "-c:v libx264",
-        "-preset medium",
-        "-c:a aac",
-        "-movflags +faststart",
-        "-threads 8"
+        '-c:v', 'libx264',
+        '-preset', 'fast',
+        '-c:a', 'aac',
+        '-movflags', '+faststart',
+        '-threads', '8'
       ])
-      .on("end", () => {
+      .on("end", async () => {
+        await fs.unlink(listFile).catch(() => {});
         console.log("🎬 Final stitching complete");
         resolve(output);
       })
-      .on("error", (err) => {
+      .on("error", async (err) => {
+        await fs.unlink(listFile).catch(() => {});
         console.error("❌ Stitching error:", err);
         reject(err);
       })
