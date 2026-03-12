@@ -157,79 +157,45 @@ const addIntroText = (input, output, title, subtitle, target) => {
   return new Promise((resolve, reject) => {
     const { w, h } = target;
     const iw_val = w < h ? w : w / 1.2;
-
-    // Relative path is safer on Windows to avoid the "C\:" drive letter crash
     const fontPath = './font.ttf';
-    console.log("Using font path:", fontPath);
+    
     const duration = 3;
     const slideTime = 0.5;
 
-    // 3. TEXT MOVEMENT: Anchored to the center of the frame
-    const textMoveX = `if(lt(t,${slideTime}), -w+(t/${slideTime})*(w+(w-text_w)/2), if(gt(t,${duration - slideTime}), (w-text_w)/2+((t-(${duration - slideTime}))/${slideTime})*w, (w-text_w)/2))`;
+    // CENTER CALCULATIONS
+    const centerX = (w - iw_val) / 2;
+    const textCenterX = `(w-text_w)/2`;
+
+    // SLIDE LOGIC (Your exact config)
+    // Box/Lines move based on iw_val
+    const moveX = `if(lt(t,${slideTime}), -${iw_val}+(t/${slideTime})*(${centerX}+${iw_val}), if(gt(t,${duration-slideTime}), ${centerX}+((t-(${duration-slideTime}))/${slideTime})*(w-${centerX}), ${centerX}))`;
+    
+    // Text moves based on text_w
+    const textMoveX = `if(lt(t,${slideTime}), -w+(t/${slideTime})*(w+${textCenterX}), if(gt(t,${duration-slideTime}), ${textCenterX}+((t-(${duration-slideTime}))/${slideTime})*w, ${textCenterX}))`;
+
+    // COMBINED FILTER STRING (Bypasses "Filter not found" error)
+    const filters = [
+      // 1. BLACK BACKGROUND BAR
+      `drawbox=x=${moveX}:y=${h/2-80}:w=${iw_val}:h=160:color=black@0.4:t=fill:enable='between(t,0,${duration})'`,
+      // 2. TOP WHITE LINE
+      `drawbox=x=${moveX}:y=${h/2-55}:w=${iw_val}:h=3:color=white@0.8:t=fill:enable='between(t,0,${duration})'`,
+      // 3. BOTTOM WHITE LINE
+      `drawbox=x=${moveX}:y=${h/2+25}:w=${iw_val}:h=3:color=white@0.8:t=fill:enable='between(t,0,${duration})'`,
+      // 4. VEHICLE NAME (Sliding Text)
+      `drawtext=text='${title.toUpperCase()}':fontfile=${fontPath}:fontsize=56:fontcolor=white:borderw=1:bordercolor=white:x=${textMoveX}:y=${h/2-40}:enable='between(t,0,${duration})'`,
+      // 5. SHOP NAME (Sliding Text)
+      `drawtext=text='${subtitle}':fontfile=${fontPath}:fontsize=24:fontcolor=white:borderw=1:bordercolor=white:x=${textMoveX}:y=${h/2+35}:enable='between(t,0,${duration})'`
+    ].join(',');
+
     ffmpeg(input)
-      .videoFilters([
-        // 1. BLACK BACKGROUND BAR
-        {
-          filter: "drawbox",
-          options: {
-            y: `${h / 2 - 80}`,
-            w: `${iw_val}`, h: 160,
-            color: "black@0.4", t: "fill",
-            enable: `between(t,0,${duration})`
-          }
-        },
-        // 2. TOP WHITE LINE
-        {
-          filter: "drawbox",
-          options: {
-            y: `${h / 2 - 55}`,
-            w: `${iw_val}`, h: 3,
-            color: "white@0.8", t: "fill",
-            enable: `between(t,0,${duration})`
-          }
-        },
-        // 3. BOTTOM WHITE LINE
-        {
-          filter: "drawbox",
-          options: {
-            y: `${h / 2 + 25}`,
-            w: `${iw_val}`, h: 3,
-            color: "white@0.8", t: "fill",
-            enable: `between(t,0,${duration})`
-          }
-        },
-        // 4. VEHICLE NAME (Sliding Text)
-        {
-          filter: "drawtext",
-          options: {
-            text: title.toUpperCase(),
-            fontfile: fontPath,
-            fontsize: 56,
-            fontcolor: "white",
-            borderw: 1,
-            bordercolor: "white",
-            x: textMoveX,
-            y: `${h / 2 - 40}`,
-            enable: `between(t,0,${duration})`
-          }
-        },
-        // 5. SHOP NAME (Sliding Text)
-        {
-          filter: "drawtext",
-          options: {
-            text: subtitle,
-            fontfile: fontPath,
-            fontsize: 24,
-            fontcolor: "white",
-            borderw: 1,
-            bordercolor: "white",
-            x: textMoveX,
-            y: `${h / 2 + 35}`,
-            enable: `between(t,0,${duration})`
-          }
-        }
+      .complexFilter(filters)
+      .outputOptions([
+        "-c:v libx264",
+        "-preset superfast", // Optimization for Cloud Run
+        "-crf 23",
+        "-c:a copy"
       ])
-      .outputOptions(["-c:v libx264", "-preset veryfast", "-c:a copy"])
+      .on("start", (cmd) => console.log("🚀 FFmpeg Command:", cmd))
       .on("end", () => resolve(output))
       .on("error", (err) => {
         console.error("❌ Intro Text Error:", err.message);
