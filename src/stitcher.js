@@ -249,17 +249,15 @@ export const stitchSequence = (fileList, outputPath, target) => {
     // 3. Build the complex filter for standardization (720p, 30fps)
     const filterComplex = fileList.map((_, i) => {
       if (isPortrait) {
-        // PORTRAIT MODE: Use fast avgblur padding
         return [
-          `[${i}:v]scale=${w}:${h}:force_original_aspect_ratio=increase,avgblur=sizeX=40:sizeY=40,crop=${w}:${h}[bg${i}]`,
-          `[${i}:v]scale=${w}:${h}:force_original_aspect_ratio=decrease[fg${i}]`,
+          `[${i}:v]scale=${w}:${h}:force_original_aspect_ratio=increase,avgblur=sizeX=40:sizeY=40,crop=${w}:${h},setsar=1:1[bg${i}]`,
+          `[${i}:v]scale=${w}:${h}:force_original_aspect_ratio=decrease,setsar=1:1[fg${i}]`,
           `[bg${i}][fg${i}]overlay=(W-w)/2:(H-h)/2,fps=30,format=yuv420p[v${i}]`,
           `[${i}:a]aresample=async=1,aformat=sample_rates=44100:channel_layouts=stereo[a${i}]`
         ].join(';');
       } else {
-        // LANDSCAPE MODE: Fast scale/pad (No Blur)
         return [
-          `[${i}:v]scale=${w}:${h}:force_original_aspect_ratio=decrease,pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2,fps=30,format=yuv420p[v${i}]`,
+          `[${i}:v]scale=${w}:${h}:force_original_aspect_ratio=decrease,pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2,setsar=1:1,fps=30,format=yuv420p[v${i}]`,
           `[${i}:a]aresample=async=1,aformat=sample_rates=44100:channel_layouts=stereo[a${i}]`
         ].join(';');
       }
