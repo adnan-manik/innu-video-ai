@@ -279,16 +279,18 @@ const createOutro = (image, output, target) => {
 /* -------------------------------- */
 /* STITCH WITH TRANSITIONS          */
 /* -------------------------------- */
-
 const stitchClips = (clips, output) => {
   return new Promise((resolve, reject) => {
     const command = ffmpeg();
     clips.forEach(c => command.input(c));
 
-    // Concatenate exactly 1 video and 1 audio stream from each input
+    // ── Generate Input References ─────────────────────────────────────────────
+    // This creates a string like "[0:v][0:a][1:v][1:a][2:v][2:a]"
+    const inputRefs = clips.map((_, i) => `[${i}:v][${i}:a]`).join('');
+
     command
       .complexFilter([
-        `concat=n=${clips.length}:v=1:a=1 [v] [a]`
+        `${inputRefs} concat=n=${clips.length}:v=1:a=1 [v] [a]`
       ])
       .map("[v]")
       .map("[a]")
