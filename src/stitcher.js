@@ -51,71 +51,7 @@ export const stitchDynamicSequence = async (fileList, outputPath, metadata) => {
     const orientation = await detectOrientation(fileList[0]);
     const target = orientation === "portrait" ? { w: 720, h: 1280 } : { w: 1280, h: 720 };
     const { w, h } = target;
-
-    // 2. Pre-flight: Check for audio streams to prevent "Stream not found" errors
-    const checkAudio = async (file) => {
-      const probe = await new Promise((res) => ffmpeg.ffprobe(file, (err, data) => res(data || {})));
-      return probe.streams?.some(s => s.codec_type === 'audio') || false;
-    };
-
-    const hasAudio0 = await checkAudio(fileList[0]);
-    const hasAudio1 = await checkAudio(fileList[1]);
-
-    // 3. Create Outro (Always generated with audio in our previous logic)
-    if (metadata.shopLogo) {
-      await createOutro(metadata.shopLogo, tempFiles.outro, target);
-    }
-
-    const hasOutro = fs.existsSync(tempFiles.outro);
-    const command = ffmpeg();
-    fileList.forEach(file => command.input(file));
-    if (hasOutro) command.input(tempFiles.outro);
-
-    // 4. Build Mega-Filter with Audio Insurance
-    // If no audio exists, we use 'anullsrc' to generate a silent placeholder
-    const a0Source = hasAudio0 ? `[0:a]` : `anullsrc=r=44100:cl=stereo,trim=duration=5[a0_dummy];[a0_dummy]`;
-    const a1Source = hasAudio1 ? `[1:a]` : `anullsrc=r=44100:cl=stereo,trim=duration=5[a1_dummy];[a1_dummy]`;
-
-    const filter = [
-      // Clip 1: Normalize & Audio Fix
-      `[0:v]scale=${w}:${h}:force_original_aspect_ratio=increase,boxblur=20:10,crop=${w}:${h}[bg1]`,
-      `[0:v]scale=${w}:${h}:force_original_aspect_ratio=decrease[fg1]`,
-      `[bg1][fg1]overlay=(W-w)/2:(H-h)/2,fps=30,setsar=1[v1]`,
-      `${a0Source}aresample=async=1,aformat=sample_rates=44100:channel_layouts=stereo[a1]`,
-
-      // Clip 2: Normalize & Audio Fix
-      `[1:v]scale=${w}:${h}:force_original_aspect_ratio=increase,boxblur=20:10,crop=${w}:${h}[bg2]`,
-      `[1:v]scale=${w}:${h}:force_original_aspect_ratio=decrease[fg2]`,
-      `[bg2][fg2]overlay=(W-w)/2:(H-h)/2,fps=30,setsar=1[v2]`,
-      `${a1Source}aresample=async=1,aformat=sample_rates=44100:channel_layouts=stereo[a2]`,
-
-      // Outro Handling & Final Concat
-      hasOutro 
-        ? `[2:v]fps=30,setsar=1[v3];[2:a]aformat=sample_rates=44100:channel_layouts=stereo[a3];[v1][a1][v2][a2][v3][a3]concat=n=3:v=1:a=1[v][a]`
-        : `[v1][a1][v2][a2]concat=n=2:v=1:a=1[v][a]`
-    ].join(';');
-
-    await new Promise((resolve, reject) => {
-      command
-        .complexFilter(filter)
-        .map('[v]')
-        .map('[a]')
-        .outputOptions([
-          "-c:v libx264",
-          "-preset superfast",
-          "-crf 23",
-          "-c:a aac",
-          "-b:a 128k",
-          "-movflags +faststart"
-        ])
-        .on("error", (err, stdout, stderr) => {
-          console.error("❌ FFmpeg Mega-Stitch Error:", stderr);
-          reject(err);
-        })
-        .on("end", resolve)
-        .save(outputPath);
-    });
-
+    await stitchSequence(fileList, outputPath, target); // This will handle normalization internally
     console.log("✅ Video Stitched Successfully with Audio Insurance");
 
   } catch (error) {
@@ -350,5 +286,100 @@ const stitchClips = (clips, output) => {
         reject(err);
       })
       .save(output);
+  });
+};
+
+// ⚡ Helper: Stitch Videos Dynamically (with Smart Compression)
+export const stitchSequence = (fileList, outputPath, target) => {
+  return new Promise((resolve, reject) => {
+    if (fileList.length === 0) return reject(new Error("No files provided for stitching."));
+    const { w, h } = target;
+    // 1. Calculate Total Input Size in MB
+    let totalSizeInMB = 0;
+    try {
+      const totalBytes = fileList.reduce((acc, file) => acc + fs.statSync(file).size, 0);
+      totalSizeInMB = totalBytes / (1024 * 1024);
+      console.log(`📊 Total Input Size: ${totalSizeInMB.toFixed(2)} MB`);
+    } catch (err) {
+      console.warn("⚠️ Could not read file sizes. Defaulting to Size Priority.");
+      totalSizeInMB = 150; // Fallback to heavy compression if fs fails
+    }
+
+    // 2. Define Output Options dynamically
+    let outputOptions = [
+      '-map [v]', 
+      '-map [a]',
+      '-c:v libx264',
+      '-movflags +faststart', // Essential for fast web playback
+      '-shortest'             // Stop encoding when the shortest stream ends
+    ];
+
+    if (totalSizeInMB < 95) {
+      console.log("🚀 < 100MB: Prioritizing Quality & Speed (Superfast/CRF23)");
+      outputOptions.push(
+        '-preset superfast',   // Highest speed (sacrifices compression efficiency, but we don't care here)
+        '-crf 23',             // High visual quality
+        '-c:a aac',            // Compress audio
+        '-b:a 128k'            // Good audio quality
+      );
+    } else {
+      // 🗜️ >= 100MB: Prioritize SIZE and BALANCE (Speed/Quality)
+      console.log("🗜️ >= 100MB: Prioritizing Size (Fast/CRF28/Maxrate)");
+      outputOptions.push(
+        '-preset fast',        // Balanced speed (gives CPU time to actually compress the file)
+        '-crf 28',             // Lower quality / higher compression
+        '-maxrate 2.5M',       // Hard cap on video bitrate to prevent size spikes
+        '-bufsize 5M',         // Required when using maxrate
+        '-c:a aac',            // Compress audio
+        '-b:a 96k'             // Lower audio bitrate to save maximum space
+      );
+    }
+
+    // 3. Build the complex filter for standardization (720p, 30fps)
+    const filterComplex = fileList.map((_, i) => {
+    if (isPortrait) {
+        // PORTRAIT MODE: Use fast avgblur padding
+        return [
+            `[${i}:v]scale=${w}:${h}:force_original_aspect_ratio=increase,avgblur=sizeX=20:sizeY=20,crop=${w}:${h}[bg${i}]`,
+            `[${i}:v]scale=${w}:${h}:force_original_aspect_ratio=decrease[fg${i}]`,
+            `[bg${i}][fg${i}]overlay=(W-w)/2:(H-h)/2,fps=30,format=yuv420p[v${i}]`,
+            `[${i}:a]aresample=async=1,aformat=sample_rates=44100:channel_layouts=stereo[a${i}]`
+        ].join(';');
+    } else {
+        // LANDSCAPE MODE: Fast scale/pad (No Blur)
+        return [
+            `[${i}:v]scale=${w}:${h}:force_original_aspect_ratio=decrease,pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2,fps=30,format=yuv420p[v${i}]`,
+            `[${i}:a]aresample=async=1,aformat=sample_rates=44100:channel_layouts=stereo[a${i}]`
+        ].join(';');
+    }
+}).join(';');
+
+    const inputStreams = fileList.map((_, i) => `[v${i}][a${i}]`).join('');
+
+    // 4. Run FFmpeg
+    const command = ffmpeg();
+    fileList.forEach(file => command.input(file));
+
+    console.log("⏳ Starting FFmpeg Stitching Process...");
+    
+    command
+      .complexFilter(`${filterComplex};${inputStreams}concat=n=${fileList.length}:v=1:a=1[v][a]`)
+      .outputOptions(outputOptions)
+      .output(outputPath)
+      .on('end', () => {
+          // Log the final output size so you can see if your logic worked
+          try {
+            const outSizeMB = fs.statSync(outputPath).size / (1024 * 1024);
+            console.log(`✅ Stitching Complete! Final Output Size: ${outSizeMB.toFixed(2)} MB`);
+          } catch (e) {
+            console.log("✅ Stitching Complete!");
+          }
+          resolve(outputPath);
+      })
+      .on('error', (err, stdout, stderr) => {
+          console.error("❌ FFmpeg Stitching Error:", stderr);
+          reject(err);
+      })
+      .run();
   });
 };
