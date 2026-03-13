@@ -47,7 +47,7 @@ const getMetadata = async (rawPath) => {
     } catch (e) {
       console.error("Error parsing vehicle_info:", e);
     }
-    const shopLogoPath = path.join(VIDEO_BUCKET, "shop_logo", `${row.shop_id}.png`);
+    const shopLogoPath = path.join(VIDEO_BUCKET, "shop_logos", `${row.shop_id}.png`);
     data = {
       vehicleName: `${vehicleInfo.make || ''} ${vehicleInfo.model || ''}`.trim(),
       shopName: row.shop_name,

@@ -4,6 +4,7 @@ import ffprobe from "ffprobe-static";
 import path from "path";
 import os from "os";
 import fs from "fs/promises";
+import { existsSync, statSync } from "fs";
 
 ffmpeg.setFfmpegPath(ffmpegStatic);
 ffmpeg.setFfprobePath(ffprobe.path);
@@ -39,18 +40,26 @@ export const extractFrame = (inputPath, outputPath) => {
 };
 
 export const stitchDynamicSequence = async (fileList, outputPath, metadata) => {
+  console.time("stitching")
   const id = Date.now() + "_" + Math.floor(Math.random() * 1000);
   const tmp = (name) => path.join(os.tmpdir(), `${id}_${name}`);
 
   const tempFiles = {
-    outro: tmp("outro_stage.mp4")
+    outro: tmp("outro.mp4")
   };
 
   try {
     // 1. Detect Orientation & Hardware Specs
     const orientation = await detectOrientation(fileList[0]);
     const target = orientation === "portrait" ? { w: 720, h: 1280 } : { w: 1280, h: 720 };
-    const { w, h } = target;
+    if (metadata.shopLogo) {
+      if (!existsSync(metadata.shopLogo)) {
+        console.warn("⚠️ Shop logo not found at path:", metadata.shopLogo);
+      } else {
+        await createOutro(metadata.shopLogo, tempFiles.outro, target);
+        fileList.push(tempFiles.outro);
+      }
+    }
     await stitchSequence(fileList, outputPath, target); // This will handle normalization internally
     console.log("✅ Video Stitched Successfully with Audio Insurance");
 
@@ -58,8 +67,9 @@ export const stitchDynamicSequence = async (fileList, outputPath, metadata) => {
     console.error("❌ Critical Failure in Sequence:", error);
     throw error;
   } finally {
-    if (fs.existsSync(tempFiles.outro)) await fs.unlink(tempFiles.outro);
+    if (existsSync(tempFiles.outro)) await fs.unlink(tempFiles.outro);
     console.log("🧹 Cleanup complete");
+    console.timeLog("stitching")
   }
 };
 
@@ -93,76 +103,6 @@ const detectOrientation = (file) => {
       const effectiveHeight = isRotated ? stream.width : stream.height;
 
       resolve(effectiveHeight > effectiveWidth ? "portrait" : "landscape");
-    });
-  });
-};
-
-/* -------------------------------- */
-/* NORMALIZATION WITH BLUR PADDING  */
-/* -------------------------------- */
-
-const normalizeClip = (input, output, target) => {
-  const { w, h } = target;
-
-  return new Promise((resolve, reject) => {
-    // 1. Probe the input to determine its orientation
-    ffmpeg.ffprobe(input, (err, metadata) => {
-      if (err) return reject(err);
-
-      const stream = metadata.streams.find(s => s.codec_type === 'video');
-      if (!stream) return reject(new Error("No video stream found"));
-
-      // Handle metadata rotation (essential for phone videos)
-      let rotation = 0;
-      if (stream.side_data_list) {
-        const sideData = stream.side_data_list.find(sd => sd.rotation !== undefined);
-        if (sideData) rotation = Math.abs(sideData.rotation);
-      }
-      
-      const isRotated = rotation === 90 || rotation === 270;
-      const inputW = isRotated ? stream.height : stream.width;
-      const inputH = isRotated ? stream.width : stream.height;
-
-      const inputIsPortrait = inputH > inputW;
-      const targetIsPortrait = h > w;
-
-      let filter;
-
-      // 2. Build Filter based on Orientation Match
-      if (inputIsPortrait === targetIsPortrait) {
-        // MATCH: Simple scale and pad (Letterbox/Pillarbox)
-        console.log(`✅ Orientation Match: Scaling to ${w}x${h}`);
-        filter = `
-          [0:v]scale=${w}:${h}:force_original_aspect_ratio=decrease,
-          pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2,
-          fps=30,settb=AVTB,format=yuv420p
-        `;
-      } else {
-        // MISMATCH: Add Blur Padding
-        console.log(`⚠️ Orientation Mismatch: Adding Blur Padding`);
-        filter = `
-          [0:v]scale=${w}:${h}:force_original_aspect_ratio=increase,
-          boxblur=20:10,
-          crop=${w}:${h}[bg];
-          [0:v]scale=${w}:${h}:force_original_aspect_ratio=decrease[fg];
-          [bg][fg]overlay=(W-w)/2:(H-h)/2,
-          fps=30,settb=AVTB,format=yuv420p
-        `;
-      }
-
-      // 3. Execute FFmpeg
-      ffmpeg(input)
-        .complexFilter(filter)
-        .audioFilters("aformat=sample_rates=44100:channel_layouts=stereo")
-        .outputOptions([
-          "-preset fast",
-          "-c:v libx264",
-          "-c:a aac",
-          "-threads 8"
-        ])
-        .on("end", () => resolve(output))
-        .on("error", reject)
-        .save(output);
     });
   });
 };
@@ -214,6 +154,8 @@ const addIntroText = (input, output, title, subtitle, target) => {
       .save(output);
   });
 };
+
+
 /* -------------------------------- */
 /* OUTRO IMAGE                      */
 /* -------------------------------- */
@@ -222,14 +164,16 @@ const createOutro = (image, output, target) => {
   const { w, h } = target;
 
   return new Promise((resolve, reject) => {
-    const videoFilter = `
-      [0:v]loop=loop=-1:size=1:start=0,
-      scale=${w}:${h}:force_original_aspect_ratio=increase,
-      boxblur=20:10,
-      crop=${w}:${h},
-      trim=duration=2,
-      format=yuv420p[vout]
-    `;
+    const videoFilter = [
+      // 1. Create the blurred background from the static image
+      `[0:v]loop=loop=-1:size=1:start=0,scale=${w}:${h}:force_original_aspect_ratio=increase,avgblur=sizeX=20:sizeY=20,crop=${w}:${h},trim=duration=2[bg]`,
+
+      // 2. Create the clear foreground logo/image
+      `[0:v]loop=loop=-1:size=1:start=0,scale=${w}:${h}:force_original_aspect_ratio=decrease,trim=duration=2[fg]`,
+
+      // 3. Overlay the logo on the blur and set final format
+      `[bg][fg]overlay=(W-w)/2:(H-h)/2,format=yuv420p[vout]`
+    ].join(';');
 
     const audioFilter = `aevalsrc=0:c=stereo:s=44100:d=2[aout]`;
 
@@ -254,50 +198,17 @@ const createOutro = (image, output, target) => {
 };
 
 /* -------------------------------- */
-/* STITCH WITH TRANSITIONS          */
+/* STITCH          */
 /* -------------------------------- */
-const stitchClips = (clips, output) => {
-  return new Promise((resolve, reject) => {
-    const command = ffmpeg();
-    clips.forEach(c => command.input(c));
-
-    // ── Generate Input References ─────────────────────────────────────────────
-    // This creates a string like "[0:v][0:a][1:v][1:a][2:v][2:a]"
-    const inputRefs = clips.map((_, i) => `[${i}:v][${i}:a]`).join('');
-
-    command
-      .complexFilter([
-        `${inputRefs} concat=n=${clips.length}:v=1:a=1 [v] [a]`
-      ])
-      .map("[v]")
-      .map("[a]")
-      .outputOptions([
-        "-c:v libx264",
-        "-preset medium",
-        "-c:a aac",
-        "-movflags +faststart"
-      ])
-      .on("end", () => {
-        console.log("🎬 Final stitching complete");
-        resolve(output);
-      })
-      .on("error", (err) => {
-        console.error("❌ Stitching error:", err);
-        reject(err);
-      })
-      .save(output);
-  });
-};
-
-// ⚡ Helper: Stitch Videos Dynamically (with Smart Compression)
 export const stitchSequence = (fileList, outputPath, target) => {
   return new Promise((resolve, reject) => {
     if (fileList.length === 0) return reject(new Error("No files provided for stitching."));
     const { w, h } = target;
+    const isPortrait = h > w;
     // 1. Calculate Total Input Size in MB
     let totalSizeInMB = 0;
     try {
-      const totalBytes = fileList.reduce((acc, file) => acc + fs.statSync(file).size, 0);
+      const totalBytes = fileList.reduce((acc, file) => acc + statSync(file).size, 0);
       totalSizeInMB = totalBytes / (1024 * 1024);
       console.log(`📊 Total Input Size: ${totalSizeInMB.toFixed(2)} MB`);
     } catch (err) {
@@ -307,7 +218,7 @@ export const stitchSequence = (fileList, outputPath, target) => {
 
     // 2. Define Output Options dynamically
     let outputOptions = [
-      '-map [v]', 
+      '-map [v]',
       '-map [a]',
       '-c:v libx264',
       '-movflags +faststart', // Essential for fast web playback
@@ -337,22 +248,22 @@ export const stitchSequence = (fileList, outputPath, target) => {
 
     // 3. Build the complex filter for standardization (720p, 30fps)
     const filterComplex = fileList.map((_, i) => {
-    if (isPortrait) {
+      if (isPortrait) {
         // PORTRAIT MODE: Use fast avgblur padding
         return [
-            `[${i}:v]scale=${w}:${h}:force_original_aspect_ratio=increase,avgblur=sizeX=20:sizeY=20,crop=${w}:${h}[bg${i}]`,
-            `[${i}:v]scale=${w}:${h}:force_original_aspect_ratio=decrease[fg${i}]`,
-            `[bg${i}][fg${i}]overlay=(W-w)/2:(H-h)/2,fps=30,format=yuv420p[v${i}]`,
-            `[${i}:a]aresample=async=1,aformat=sample_rates=44100:channel_layouts=stereo[a${i}]`
+          `[${i}:v]scale=${w}:${h}:force_original_aspect_ratio=increase,avgblur=sizeX=40:sizeY=40,crop=${w}:${h}[bg${i}]`,
+          `[${i}:v]scale=${w}:${h}:force_original_aspect_ratio=decrease[fg${i}]`,
+          `[bg${i}][fg${i}]overlay=(W-w)/2:(H-h)/2,fps=30,format=yuv420p[v${i}]`,
+          `[${i}:a]aresample=async=1,aformat=sample_rates=44100:channel_layouts=stereo[a${i}]`
         ].join(';');
-    } else {
+      } else {
         // LANDSCAPE MODE: Fast scale/pad (No Blur)
         return [
-            `[${i}:v]scale=${w}:${h}:force_original_aspect_ratio=decrease,pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2,fps=30,format=yuv420p[v${i}]`,
-            `[${i}:a]aresample=async=1,aformat=sample_rates=44100:channel_layouts=stereo[a${i}]`
+          `[${i}:v]scale=${w}:${h}:force_original_aspect_ratio=decrease,pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2,fps=30,format=yuv420p[v${i}]`,
+          `[${i}:a]aresample=async=1,aformat=sample_rates=44100:channel_layouts=stereo[a${i}]`
         ].join(';');
-    }
-}).join(';');
+      }
+    }).join(';');
 
     const inputStreams = fileList.map((_, i) => `[v${i}][a${i}]`).join('');
 
@@ -361,24 +272,24 @@ export const stitchSequence = (fileList, outputPath, target) => {
     fileList.forEach(file => command.input(file));
 
     console.log("⏳ Starting FFmpeg Stitching Process...");
-    
+
     command
       .complexFilter(`${filterComplex};${inputStreams}concat=n=${fileList.length}:v=1:a=1[v][a]`)
       .outputOptions(outputOptions)
       .output(outputPath)
       .on('end', () => {
-          // Log the final output size so you can see if your logic worked
-          try {
-            const outSizeMB = fs.statSync(outputPath).size / (1024 * 1024);
-            console.log(`✅ Stitching Complete! Final Output Size: ${outSizeMB.toFixed(2)} MB`);
-          } catch (e) {
-            console.log("✅ Stitching Complete!");
-          }
-          resolve(outputPath);
+        // Log the final output size so you can see if your logic worked
+        try {
+          const outSizeMB = fs.statSync(outputPath).size / (1024 * 1024);
+          console.log(`✅ Stitching Complete! Final Output Size: ${outSizeMB.toFixed(2)} MB`);
+        } catch (e) {
+          console.log("✅ Stitching Complete!");
+        }
+        resolve(outputPath);
       })
       .on('error', (err, stdout, stderr) => {
-          console.error("❌ FFmpeg Stitching Error:", stderr);
-          reject(err);
+        console.error("❌ FFmpeg Stitching Error:", stderr);
+        reject(err);
       })
       .run();
   });
