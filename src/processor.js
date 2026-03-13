@@ -175,8 +175,8 @@ export const processRestitchJob = async (video) => {
 
     const rawInput = path.join(VIDEO_BUCKET, rawPath);
     const eduVideo = path.join(LIBRARY_BUCKET, eduResult.rows[0].video_url);
-    const finalOutput = path.join(VIDEO_BUCKET, rawPath.replace("raw/", "processed/").replace(".mp4", "_restitched.mp4"));
-    const thumbnailPath = path.join(VIDEO_BUCKET, rawPath.replace("raw/", "thumbnails/").replace(".mp4", "_restitched.jpg"));
+    const finalOutput = rawPath.replace("raw/", "processed/").replace(".mp4", "_restitched.mp4");
+    const thumbnailPath = rawPath.replace("raw/", "thumbnails/").replace(".mp4", "_restitched.jpg");
 
     console.log("Starting Sticthing...");
     // Sequential: Wait for stitch before frame extraction
