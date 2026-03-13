@@ -127,14 +127,14 @@ export const processVideoJob = async (fileEvent) => {
     await updateVideoStatus(rawPath, "processing", "Stitching final video...");
 
     const eduVideo = path.join(LIBRARY_BUCKET, matches[0].video_url);
-    const finalOutput = path.join(VIDEO_BUCKET, rawPath.replace("raw/", "processed/"));
-    const thumbnailPath = path.join(VIDEO_BUCKET, rawPath.replace("raw/", "thumbnails/").replace(".mp4", ".jpg"));
+    const finalOutput = rawPath.replace("raw/", "processed/");
+    const thumbnailPath = rawPath.replace("raw/", "thumbnails/").replace(".mp4", ".jpg");
 
     const metadata = await getMetadata(rawPath);
 
     // Run stitcher, THEN extract frame from the result
-    await stitchDynamicSequence([rawInput, eduVideo], finalOutput, metadata);
-    await extractFrame(finalOutput, thumbnailPath);
+    await stitchDynamicSequence([rawInput, eduVideo], path.join(VIDEO_BUCKET, finalOutput), metadata);
+    await extractFrame(path.join(VIDEO_BUCKET, finalOutput), path.join(VIDEO_BUCKET, thumbnailPath));
 
     // 4. FINALIZATION
     await updateVideoStatus(rawPath, "completed", "Video processed successfully", {
@@ -180,17 +180,23 @@ export const processRestitchJob = async (video) => {
 
     console.log("Starting Sticthing...");
     // Sequential: Wait for stitch before frame extraction
-    await stitchDynamicSequence([rawInput, eduVideo], finalOutput, metadata);
-    await extractFrame(finalOutput, thumbnailPath);
+    await stitchDynamicSequence([rawInput, eduVideo], path.join(VIDEO_BUCKET, finalOutput), metadata);
+    await extractFrame(path.join(VIDEO_BUCKET, finalOutput), path.join(VIDEO_BUCKET, thumbnailPath));
     // 1. Determine the correct keywords to save
 
-    
-    console.log(`keywords type: ${typeof video.detected_keywords}, value: ${video.detected_keywords}`);
-
+    let keywords= video.detected_keywords
+    if(!keywords){
+      keywords = [{
+        "problem" : eduResult.rows[0].title,
+        "category": eduResult.rows[0].category,
+        "keywords" : []
+      }]
+    }
     // 3. Update the DB
     await updateVideoStatus(rawPath, "completed", "Video restitched successfully", {
       stitched_video_url: finalOutput,
       thumbnail_url: thumbnailPath,
+      detected_keywords : keywords,
       edu_video_id: video.edu_video_id
     });
     console.log(`✅ Restitching complete for: ${rawPath}`);
