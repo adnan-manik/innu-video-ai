@@ -182,32 +182,37 @@ export const processRestitchJob = async (video) => {
     // Sequential: Wait for stitch before frame extraction
     await stitchDynamicSequence([rawInput, eduVideo], finalOutput, metadata);
     await extractFrame(finalOutput, thumbnailPath);
-// Check for empty/missing keywords
-if(!video.detected_keywords || video.detected_keywords === "[]" || video.detected_keywords === "{}") {
-    // Keep it as a plain Javascript Array/Object
-    video.detected_keywords = [{
+    // 1. Determine the correct keywords to save
+    let finalKeywords;
+
+    if (video.detected_keywords && (Array.isArray(video.detected_keywords) || typeof video.detected_keywords === 'object')) {
+      // It's already an object/array, use it as is
+      finalKeywords = video.detected_keywords;
+    } else if (typeof video.detected_keywords === 'string' && video.detected_keywords.trim() !== "") {
+      // It's a string, try to parse it
+      try {
+        finalKeywords = JSON.parse(video.detected_keywords);
+      } catch (e) {
+        finalKeywords = null;
+      }
+    }
+
+    // 2. Fallback if keywords are missing or empty
+    if (!finalKeywords || (Array.isArray(finalKeywords) && finalKeywords.length === 0)) {
+      finalKeywords = [{
         problem: eduResult.rows[0].title,
         category: eduResult.rows[0].category,
         keywords: []
-    }];
-}
-
-// If video.detected_keywords was already a string from the DB, 
-// you might need to parse it first to ensure it's an object before passing it back
-if (typeof video.detected_keywords === 'string') {
-    try {
-        video.detected_keywords = JSON.parse(video.detected_keywords);
-    } catch (e) {
-        video.detected_keywords = []; // Fallback
+      }];
     }
-}
 
-await updateVideoStatus(rawPath, "completed", "Video restitched successfully", {
-    stitched_video_url: finalOutput,
-    thumbnail_url: thumbnailPath,
-    detected_keywords: video.detected_keywords, // Pass the OBJECT here
-    edu_video_id: video.edu_video_id
-});
+    // 3. Update the DB
+    await updateVideoStatus(rawPath, "completed", "Video restitched successfully", {
+      stitched_video_url: finalOutput,
+      thumbnail_url: thumbnailPath,
+      detected_keywords: finalKeywords, // Pass the RAW OBJECT/ARRAY
+      edu_video_id: video.edu_video_id
+    });
     console.log(`✅ Restitching complete for: ${rawPath}`);
   } catch (e) {
     console.error(`❌ Restitch Error:`, e);
