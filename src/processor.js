@@ -183,34 +183,14 @@ export const processRestitchJob = async (video) => {
     await stitchDynamicSequence([rawInput, eduVideo], finalOutput, metadata);
     await extractFrame(finalOutput, thumbnailPath);
     // 1. Determine the correct keywords to save
-    let finalKeywords;
 
-    if (video.detected_keywords && (Array.isArray(video.detected_keywords) || typeof video.detected_keywords === 'object')) {
-      // It's already an object/array, use it as is
-      finalKeywords = video.detected_keywords;
-    } else if (typeof video.detected_keywords === 'string' && video.detected_keywords.trim() !== "") {
-      // It's a string, try to parse it
-      try {
-        finalKeywords = JSON.parse(video.detected_keywords);
-      } catch (e) {
-        finalKeywords = null;
-      }
-    }
-
-    // 2. Fallback if keywords are missing or empty
-    if (!finalKeywords || (Array.isArray(finalKeywords) && finalKeywords.length === 0)) {
-      finalKeywords = [{
-        problem: eduResult.rows[0].title,
-        category: eduResult.rows[0].category,
-        keywords: []
-      }];
-    }
+    
+    console.log(`keywords type: ${typeof video.detected_keywords}, value: ${video.detected_keywords}`);
 
     // 3. Update the DB
     await updateVideoStatus(rawPath, "completed", "Video restitched successfully", {
       stitched_video_url: finalOutput,
       thumbnail_url: thumbnailPath,
-      detected_keywords: finalKeywords, // Pass the RAW OBJECT/ARRAY
       edu_video_id: video.edu_video_id
     });
     console.log(`✅ Restitching complete for: ${rawPath}`);
