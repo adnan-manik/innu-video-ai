@@ -183,20 +183,22 @@ export const processRestitchJob = async (video) => {
     await stitchDynamicSequence([rawInput, eduVideo], path.join(VIDEO_BUCKET, finalOutput), metadata);
     await extractFrame(path.join(VIDEO_BUCKET, finalOutput), path.join(VIDEO_BUCKET, thumbnailPath));
     // 1. Determine the correct keywords to save
-
-    let keywords= video.detected_keywords
+    try{
+    let keywords= JSON.parse(video.detected_keywords);
     if(!keywords){
       keywords = [{
         "problem" : eduResult.rows[0].title,
         "category": eduResult.rows[0].category,
         "keywords" : []
       }]
+    }}catch(e){
+      console.error("Error parsing existing keywords", e);
     }
     // 3. Update the DB
     await updateVideoStatus(rawPath, "completed", "Video restitched successfully", {
       stitched_video_url: finalOutput,
       thumbnail_url: thumbnailPath,
-      detected_keywords : keywords,
+      // detected_keywords : keywords,
       edu_video_id: video.edu_video_id
     });
     console.log(`✅ Restitching complete for: ${rawPath}`);
