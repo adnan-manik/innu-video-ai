@@ -30,15 +30,11 @@ const getMetadata = async (rawPath) => {
 
   if (result.rows.length === 0) {
     console.warn(`⚠️ No metadata found for ${rawPath}, using defaults`);
-    data = {
-      shopName: "Service Inspection",
-      vehicleName: "Vehicle",
-      shopLogo: null
-    };
+    data = { shopName: "Service Inspection", vehicleName: "Vehicle", shopLogo: null };
   } else {
     const row = result.rows[0];
 
-    // Parse the JSONB vehicle_info column
+    // 1. Parse Vehicle Info
     let vehicleInfo = {};
     try {
       vehicleInfo = typeof row.vehicle_info === 'string'
@@ -47,16 +43,28 @@ const getMetadata = async (rawPath) => {
     } catch (e) {
       console.error("Error parsing vehicle_info:", e);
     }
-    const shopLogoPath = path.join(VIDEO_BUCKET, "shop_logos", `${row.shop_id}.png`);
+
+    // 2. High-Speed Logo Discovery (Loop & Check)
+    const logoFolder = path.join(VIDEO_BUCKET, "shop_logos");
+    const extensions = ['.png', '.jpg', '.jpeg', '.webp'];
+    let shopLogoPath = null;
+
+    for (const ext of extensions) {
+      const testPath = path.join(logoFolder, `${row.shop_id}${ext}`);
+      if (existsSync(testPath)) {
+        shopLogoPath = testPath;
+        break; // Stop looking once we find the first match
+      }
+    }
+
     data = {
-      vehicleName: `${vehicleInfo.make || ''} ${vehicleInfo.model || ''}`.trim(),
+      vehicleName: `${vehicleInfo.make || ''} ${vehicleInfo.model || ''}`.trim() || "Vehicle",
       shopName: row.shop_name,
-      shopLogo: existsSync(shopLogoPath) ? shopLogoPath : null
+      shopLogo: shopLogoPath
     };
   }
   return data;
 };
-
 
 async function updateVideoStatus(rawPath, status, message, extraFields = {}) {
   const sets = [`status = $1`, `message = $2`, `updated_at = NOW()`];
@@ -173,39 +181,61 @@ export const processRestitchJob = async (video) => {
       return await updateVideoStatus(rawPath, "failed", "Educational video not found");
     }
 
+    // Path definitions
+    const finalOutputRelative = rawPath.replace("raw/", "processed/").replace(".mp4", "_restitched.mp4");
+    const thumbnailRelative = rawPath.replace("raw/", "thumbnails/").replace(".mp4", "_restitched.jpg");
+
+    const finalOutputPath = path.join(VIDEO_BUCKET, finalOutputRelative);
+    const thumbnailPath = path.join(VIDEO_BUCKET, thumbnailRelative);
     const rawInput = path.join(VIDEO_BUCKET, rawPath);
     const eduVideo = path.join(LIBRARY_BUCKET, eduResult.rows[0].video_url);
-    const finalOutput = rawPath.replace("raw/", "processed/").replace(".mp4", "_restitched.mp4");
-    const thumbnailPath = rawPath.replace("raw/", "thumbnails/").replace(".mp4", "_restitched.jpg");
 
-    console.log("Starting Sticthing...");
-    // Sequential: Wait for stitch before frame extraction
-    await stitchDynamicSequence([rawInput, eduVideo], path.join(VIDEO_BUCKET, finalOutput), metadata);
-    await extractFrame(path.join(VIDEO_BUCKET, finalOutput), path.join(VIDEO_BUCKET, thumbnailPath));
-    // 1. Determine the correct keywords to save
-    try{
-    let keywords= JSON.parse(video.detected_keywords);
-    if(!keywords){
-      keywords = [{
-        "problem" : eduResult.rows[0].title,
-        "category": eduResult.rows[0].category,
-        "keywords" : []
-      }]
-    }}catch(e){
+    // --- 🛡️ CHECKPOINT: Delete existing files if they exist ---
+    const filesToDelete = [finalOutputPath, thumbnailPath];
+    for (const filePath of filesToDelete) {
+      try {
+        await fs.access(filePath); // Check if file exists
+        await fs.unlink(filePath);
+        console.log(`🗑️ Deleted existing file: ${filePath}`);
+      } catch (err) {
+        // Error means file doesn't exist, which is fine
+      }
+    }
+    // --------------------------------------------------------
+
+    console.log("Starting Stitching...");
+    await stitchDynamicSequence([rawInput, eduVideo], finalOutputPath, metadata);
+    await extractFrame(finalOutputPath, thumbnailPath);
+
+    // Keywords Logic
+    let keywords;
+    try {
+      keywords = video.detected_keywords ? JSON.parse(video.detected_keywords) : null;
+    } catch (e) {
       console.error("Error parsing existing keywords", e);
     }
-    // 3. Update the DB
+
+    if (!keywords) {
+      keywords = [{
+        "problem": eduResult.rows[0].title,
+        "category": eduResult.rows[0].category,
+        "keywords": []
+      }];
+    }
+
     await updateVideoStatus(rawPath, "completed", "Video restitched successfully", {
-      stitched_video_url: finalOutput,
-      thumbnail_url: thumbnailPath,
-      // detected_keywords : keywords,
+      stitched_video_url: finalOutputRelative,
+      thumbnail_url: thumbnailRelative,
+      detected_keywords: JSON.stringify(keywords), // Ensure it's stringified for DB
       edu_video_id: video.edu_video_id
     });
+
     console.log(`✅ Restitching complete for: ${rawPath}`);
   } catch (e) {
     console.error(`❌ Restitch Error:`, e);
     await updateVideoStatus(rawPath, "failed", "internal restitch error");
   } finally {
+    // Cleanup local /tmp files
     await Promise.all(Object.values(tmp).map(f => fs.unlink(f).catch(() => { })));
   }
 };
