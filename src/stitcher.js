@@ -14,10 +14,14 @@ ffmpeg.setFfprobePath(ffprobe.path);
  * Compatible with GCS FUSE mount paths.
  */
 export const extractFrame = (inputPath, outputPath) => {
-  return new Promise((resolve, reject) => {
+  return new Promise(async (resolve, reject) => {
     // Ensure the output directory exists on the mount
     const folder = path.dirname(outputPath);
     const filename = path.basename(outputPath);
+    await fs.mkdir(folder, { recursive: true });
+    
+    const orientation = await detectOrientation(inputPath);
+    const { w, h } = orientation === "portrait" ? { w: 720, h: 1280 } : { w: 1280, h: 720 };
 
     ffmpeg(inputPath)
       .screenshots({
@@ -26,7 +30,7 @@ export const extractFrame = (inputPath, outputPath) => {
         filename: filename,
         folder: folder,
         // Match your target resolution
-        size: '1280x720'
+        size: `${w}x${h}`
       })
       .on('end', () => {
         console.log(`✅ Frame extracted to: ${outputPath}`);
@@ -49,6 +53,10 @@ export const stitchDynamicSequence = async (fileList, outputPath, metadata) => {
   };
 
   try {
+
+    // Create output directory if it doesn't exist (important for GCS FUSE mounts)
+    await fs.mkdir(path.dirname(outputPath), { recursive: true });
+
     // 1. Detect Orientation & Hardware Specs
     const orientation = await detectOrientation(fileList[0]);
     const target = orientation === "portrait" ? { w: 720, h: 1280 } : { w: 1280, h: 720 };
