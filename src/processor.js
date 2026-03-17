@@ -45,7 +45,7 @@ const getMetadata = async (rawPath) => {
     }
 
     // 2. High-Speed Logo Discovery (Loop & Check)
-    const logoFolder = path.join(VIDEO_BUCKET, "shop_logos");
+    const logoFolder = path.join(VIDEO_BUCKET, "shop_logo");
     const extensions = ['.png', '.jpg', '.jpeg', '.webp'];
     let shopLogoPath = null;
 
